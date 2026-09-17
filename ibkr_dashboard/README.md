@@ -1,5 +1,7 @@
 # IBKR Portfolio Dashboard
 
+[![IBKR dashboard](https://github.com/kelsokkary77/Dr.khaled-Elsokkary/actions/workflows/ibkr-dashboard.yml/badge.svg)](https://github.com/kelsokkary77/Dr.khaled-Elsokkary/actions/workflows/ibkr-dashboard.yml)
+
 A local web dashboard that syncs an Interactive Brokers account and renders it
 as tables and charts. It runs on your own machine, stores nothing in the cloud,
 and never places orders — every IBKR call it makes is read-only.
@@ -204,6 +206,20 @@ python3 -m pytest tests/ -q
 87 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, and the API tests run the demo provider through
 FastAPI's `TestClient`.
+
+### Continuous integration
+
+`.github/workflows/ibkr-dashboard.yml` runs on every pull request that touches
+this directory, and on pushes to `main`:
+
+| Job | What it proves |
+|---|---|
+| **Tests** | The suite passes on Python 3.11, 3.12 and 3.13 |
+| **Server smoke test** | The app boots, binds a port, syncs, and returns a payload with positive NAV and weights summing to 100% — none of which `TestClient` can show |
+| **Frontend syntax** | Both ES modules parse, and nothing pulls in a remote script, stylesheet or font |
+
+That last check is a guard, not a formality: this page reads a brokerage
+account, so a CDN reference should fail the build rather than ship.
 
 ---
 

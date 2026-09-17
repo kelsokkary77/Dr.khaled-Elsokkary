@@ -1,0 +1,168 @@
+name: IBKR dashboard
+
+# Only runs when the dashboard actually changes -- this is a profile repo, so
+# unrelated pushes should not spend CI minutes.
+on:
+  # Pull requests cover every branch; limiting push to the default branch
+  # keeps a PR commit from triggering two identical runs.
+  push:
+    branches: [main]
+    paths:
+      - "ibkr_dashboard/**"
+      - ".github/workflows/ibkr-dashboard.yml"
+  pull_request:
+    paths:
+      - "ibkr_dashboard/**"
+      - ".github/workflows/ibkr-dashboard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ibkr_dashboard
+
+jobs:
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: ibkr_dashboard/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  smoke:
+    name: Server smoke test
+    runs-on: ubuntu-latest
+    needs: tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ibkr_dashboard/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Proves the app actually boots and serves real data, which the unit
+      # tests cannot: they use TestClient and never bind a socket.
+      - name: Start the server
+        env:
+          IBKR_PROVIDER: demo
+          IBKR_DB_PATH: /tmp/ci-smoke.sqlite3
+        run: |
+          python -m uvicorn backend.main:app --host 127.0.0.1 --port 8787 \
+            > /tmp/server.log 2>&1 &
+          echo $! > /tmp/server.pid
+          for _ in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8787/api/health > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "::error::Server did not become healthy in 20s"
+          cat /tmp/server.log
+          exit 1
+
+      - name: Sync and check the dashboard payload
+        run: |
+          set -euo pipefail
+          curl -sf -X POST http://127.0.0.1:8787/api/sync > /tmp/sync.json
+          curl -sf http://127.0.0.1:8787/api/dashboard > /tmp/dashboard.json
+          python - <<'PY'
+          import json, sys
+
+          sync = json.load(open("/tmp/sync.json"))
+          assert sync["ok"] is True, sync
+          assert sync["positions"] > 0, "sync returned no positions"
+
+          data = json.load(open("/tmp/dashboard.json"))
+          required = {
+              "summary", "positions", "cash", "trades", "allocation",
+              "concentration", "movers", "nav", "activity", "base_currency",
+          }
+          missing = required - set(data)
+          assert not missing, f"dashboard payload missing {missing}"
+          assert data["summary"]["net_liquidation"] > 0, "NAV should be positive"
+
+          weights = sum(p["weight_pct"] for p in data["positions"])
+          assert abs(weights - 100.0) < 0.01, f"weights sum to {weights}, not 100"
+
+          print(f"OK: {len(data['positions'])} positions, "
+                f"{data['nav']['observations']} NAV points")
+          PY
+
+      - name: Check the frontend is served
+        run: |
+          set -euo pipefail
+          curl -sf http://127.0.0.1:8787/ | grep -q "IBKR Portfolio Dashboard"
+          for asset in app.js charts.js styles.css; do
+            curl -sf -o /dev/null "http://127.0.0.1:8787/static/$asset"
+            echo "served: $asset"
+          done
+
+      - name: Server log
+        if: always()
+        run: cat /tmp/server.log || true
+
+      - name: Stop the server
+        if: always()
+        run: kill "$(cat /tmp/server.pid)" 2>/dev/null || true
+
+  frontend:
+    name: Frontend syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The frontend has no build step and no dependencies, so a parse check
+      # is what there is to check -- behaviour is covered by the smoke job.
+      - name: Parse the ES modules
+        run: |
+          set -euo pipefail
+          for file in frontend/app.js frontend/charts.js; do
+            cp "$file" "/tmp/$(basename "$file" .js).mjs"
+            node --check "/tmp/$(basename "$file" .js).mjs"
+            echo "parsed: $file"
+          done
+
+      - name: Check for CDN references
+        run: |
+          # The dashboard reads a brokerage account: it must not pull in
+          # third-party scripts, and it must keep working offline.
+          if grep -rnE 'src="https?://|@import +url\(https?://|from "https?://' frontend/; then
+            echo "::error::frontend must not load remote resources"
+            exit 1
+          fi
+          echo "no remote resources referenced"
