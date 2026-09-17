@@ -27,20 +27,71 @@ Every chart has a **Table** toggle, so no number is reachable only through color
 
 ---
 
-## Quick start
+## Running it
+
+### 1. Check you have Python 3.11 or newer
 
 ```bash
-cd ibkr_dashboard
+python3 --version
+```
+
+macOS still ships Python 3.9, which is too old. If yours is below 3.11:
+
+| | |
+|---|---|
+| macOS | `brew install python@3.13`, or download from [python.org](https://www.python.org/downloads/) |
+| Ubuntu | `sudo apt install python3.13 python3.13-venv` |
+| Windows | [python.org](https://www.python.org/downloads/) — tick **"Add python.exe to PATH"** |
+
+`run.sh` checks this for you and says exactly what to install if the version is
+too old, rather than failing later with a confusing error.
+
+### 2. Get the code
+
+```bash
+git clone https://github.com/kelsokkary77/Dr.khaled-Elsokkary.git
+cd Dr.khaled-Elsokkary/ibkr_dashboard
+```
+
+No git? Download the repository as a ZIP from GitHub (**Code → Download ZIP**),
+unzip it, and open the `ibkr_dashboard` folder in a terminal.
+
+### 3. Start it
+
+```bash
 ./run.sh
 ```
 
-Then open <http://127.0.0.1:8787>.
+Then open **<http://127.0.0.1:8787>**. Press **Ctrl+C** in the terminal to stop.
 
-On first run this creates a virtualenv, installs three dependencies, and starts
-the dashboard on the **built-in sample portfolio** — no IBKR credentials needed.
-That lets you see exactly what the dashboard does before you connect anything.
+The first run takes about half a minute: it creates a virtualenv and installs
+three dependencies. After that it starts in a couple of seconds.
 
-To connect your real account, pick one of the two options below.
+**Windows**, which has no bash, run these three lines instead:
+
+```bat
+py -3.13 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8787
+```
+
+### What you'll see first
+
+The dashboard opens on the **built-in sample portfolio** — no IBKR credentials
+needed, nothing connected. That is deliberate: you get to see exactly what it
+does before handing it anything real. A banner at the top says so.
+
+To connect your own account, pick one of the two options below.
+
+### Using a different Python or port
+
+```bash
+PYTHON=/usr/local/bin/python3.13 ./run.sh   # a specific interpreter
+IBKR_PORT=9000 ./run.sh                     # a different port
+```
+
+If a run fails partway through, delete the `.venv` folder and run `./run.sh`
+again — it rebuilds from scratch.
 
 ---
 

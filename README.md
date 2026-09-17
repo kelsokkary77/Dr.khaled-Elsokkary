@@ -25,8 +25,11 @@ charts — net liquidation over time, allocation, per-position P&L, open
 positions, cash balances and trades. Read-only, runs on localhost, no cloud.
 
 ```bash
-cd ibkr_dashboard && ./run.sh
+git clone https://github.com/kelsokkary77/Dr.khaled-Elsokkary.git
+cd Dr.khaled-Elsokkary/ibkr_dashboard && ./run.sh
 ```
+
+Needs Python 3.11+. Opens at <http://127.0.0.1:8787>.
 
 Connects through IBKR's Flex Web Service or the Client Portal Gateway, and ships
 with a sample portfolio so you can try it before wiring up credentials. See the
