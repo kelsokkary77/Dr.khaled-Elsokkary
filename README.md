@@ -13,3 +13,21 @@ I’m documenting my progress as I bridge medicine with machine learning — one
 
 ### 🧰 Tools & Skills  
 Python | Pandas | NumPy | Jupyter | Scikit-Learn | Data Analysis | Clinical Research  
+
+---
+
+## Projects
+
+### [IBKR Portfolio Dashboard](ibkr_dashboard/)
+
+A local web dashboard that syncs an Interactive Brokers account into tables and
+charts — net liquidation over time, allocation, per-position P&L, open
+positions, cash balances and trades. Read-only, runs on localhost, no cloud.
+
+```bash
+cd ibkr_dashboard && ./run.sh
+```
+
+Connects through IBKR's Flex Web Service or the Client Portal Gateway, and ships
+with a sample portfolio so you can try it before wiring up credentials. See the
+[project README](ibkr_dashboard/README.md) for setup.
