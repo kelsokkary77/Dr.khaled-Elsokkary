@@ -34,3 +34,11 @@ Needs Python 3.11+. Opens at <http://127.0.0.1:8787>.
 Connects through IBKR's Flex Web Service or the Client Portal Gateway, and ships
 with a sample portfolio so you can try it before wiring up credentials. See the
 [project README](ibkr_dashboard/README.md) for setup.
+
+---
+
+## License
+
+All rights reserved — see [LICENSE](LICENSE). This repository is public so
+it can be viewed; that does not grant permission to copy, reuse, or resell
+its contents.
