@@ -388,6 +388,14 @@ export function barsH(container, options) {
     rowHeight = 30,
     maxBar = 24,
     color = "--series-1",
+    // Per-row color overrides the single hue above -- e.g. "one bar per
+    // sector's color" instead of "every bar the same blue". Optional and
+    // backward compatible: existing callers (Allocation, Largest Holdings)
+    // pass neither and keep the single-hue magnitude bar unchanged.
+    colorFor,
+    // Swatch + label rows rendered below the chart when colorFor is used --
+    // color carries identity here, so a legend is not optional (see rules).
+    legend,
     secondary = (row) => `${fmt.pct(row.weight_pct ?? 0, 1)} of book`,
   } = options;
 
@@ -434,8 +442,9 @@ export function barsH(container, options) {
         }, row[labelKey]),
       );
 
+      const rowHue = colorFor ? token(colorFor(row)) : hue;
       group.appendChild(
-        el("path", { d: barPath(left, y, w, barH, "right"), fill: hue }),
+        el("path", { d: barPath(left, y, w, barH, "right"), fill: rowHue }),
       );
 
       // Value at the tip, outside the bar end -- it can never clip the text.
@@ -479,7 +488,20 @@ export function barsH(container, options) {
     void surface;
 
     container.querySelector("svg")?.remove();
+    container.querySelector(".legend")?.remove();
     container.insertBefore(svg, container.firstChild);
+
+    if (legend && legend.length) {
+      const legendEl = document.createElement("div");
+      legendEl.className = "legend";
+      legendEl.innerHTML = legend
+        .map(
+          (item) =>
+            `<span class="item"><span class="swatch" style="background:${token(item.color)}"></span>${item.label}</span>`,
+        )
+        .join("");
+      container.appendChild(legendEl);
+    }
   });
 }
 
@@ -610,4 +632,219 @@ export function divergingBars(container, options) {
   });
 }
 
-export const internals = { niceTicks, barPath, textWidth };
+/* ------------------------------------------------------------- donut chart */
+
+/**
+ * SVG path for one ring segment, `startAngle`..`endAngle` in radians,
+ * measured clockwise from 12 o'clock -- the usual donut-chart convention.
+ */
+function arcPath(cx, cy, rOuter, rInner, startAngle, endAngle) {
+  const point = (r, a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+  const [x1, y1] = point(rOuter, startAngle);
+  const [x2, y2] = point(rOuter, endAngle);
+  const [x3, y3] = point(rInner, endAngle);
+  const [x4, y4] = point(rInner, startAngle);
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  return (
+    `M${x1},${y1} A${rOuter},${rOuter} 0 ${largeArc} 1 ${x2},${y2} ` +
+    `L${x3},${y3} A${rInner},${rInner} 0 ${largeArc} 0 ${x4},${y4} Z`
+  );
+}
+
+/**
+ * Part-to-whole at a glance: a ring, a headline slice called out in the
+ * hole, a legend carrying every value as text (never color alone). Capped
+ * by the caller at a handful of named slices plus one "Other" bucket --
+ * past that, adjacent slices blur and a table is the honest answer.
+ *
+ * `rows` is pre-built by the caller as `[{label, value, color}, ...]`,
+ * largest first, with any catch-all bucket last regardless of its size --
+ * "Other" is a bucket, not a competitor for top billing.
+ */
+export function donutChart(container, options) {
+  const { rows = [], height = 240, currency = "USD", ariaLabel = "Distribution" } = options;
+
+  if (!rows.length) {
+    emptyState(container, "Nothing to show.");
+    return;
+  }
+
+  const tooltip = attachTooltip(container);
+
+  responsive(container, () => {
+    const total = rows.reduce((sum, r) => sum + Math.max(0, Number(r.value) || 0), 0) || 1;
+    const box = height;
+    const cx = box / 2;
+    const cy = box / 2;
+    const rOuter = box / 2 - 14;
+    const rInner = rOuter * 0.6;
+    // A little angular air between slices -- the ring's version of the 2px
+    // surface gap that separates adjacent bars.
+    const gap = rows.length > 1 ? 0.02 : 0;
+
+    const svg = el("svg", {
+      viewBox: `0 0 ${box} ${box}`, width: box, height: box,
+      role: "img", "aria-label": ariaLabel,
+    });
+
+    let cursor = 0;
+    rows.forEach((row) => {
+      const fraction = Math.max(0, Number(row.value) || 0) / total;
+      const start = cursor + gap / 2;
+      cursor += fraction * Math.PI * 2;
+      const end = Math.max(start, cursor - gap / 2);
+
+      const path = el("path", { d: arcPath(cx, cy, rOuter, rInner, start, end), fill: token(row.color) });
+      path.addEventListener("pointerenter", () => path.setAttribute("fill-opacity", 0.85));
+      path.addEventListener("pointermove", (event) => {
+        const rect = container.getBoundingClientRect();
+        tooltip.show(
+          `<div class="t-title">${row.label}</div>
+           <div class="t-row"><span>Value</span><span>${fmt.currency(row.value, currency)}</span></div>
+           <div class="t-row"><span>Share</span><span>${fmt.pct(fraction * 100, 1)}</span></div>`,
+          event.clientX - rect.left,
+          event.clientY - rect.top,
+        );
+      });
+      path.addEventListener("pointerleave", () => {
+        path.removeAttribute("fill-opacity");
+        tooltip.hide();
+      });
+      svg.appendChild(path);
+    });
+
+    // The hole calls out the single most useful number: the largest slice.
+    const top = rows[0];
+    const topShare = (Math.max(0, Number(top.value) || 0) / total) * 100;
+    svg.appendChild(
+      el("text", { x: cx, y: cy - 5, "text-anchor": "middle", class: "mark-label strong", "font-size": 16 }, top.label),
+    );
+    svg.appendChild(
+      el("text", { x: cx, y: cy + 15, "text-anchor": "middle", class: "tick" }, `${fmt.pct(topShare, 1)} of book`),
+    );
+
+    const legendHtml = rows
+      .map(
+        (row) => `<span class="item">
+          <span class="swatch" style="background:${token(row.color)}"></span>
+          ${row.label} &middot; ${fmt.pct((Math.max(0, Number(row.value) || 0) / total) * 100, 1)}
+        </span>`,
+      )
+      .join("");
+
+    const wrap = document.createElement("div");
+    wrap.className = "donut-wrap";
+    wrap.innerHTML = '<div class="donut-ring"></div><div class="legend donut-legend"></div>';
+    wrap.querySelector(".donut-ring").appendChild(svg);
+    wrap.querySelector(".donut-legend").innerHTML = legendHtml;
+
+    container.querySelector(".donut-wrap")?.remove();
+    container.insertBefore(wrap, container.firstChild);
+  });
+}
+
+/* ------------------------------------------------------- grouped bars (2 series) */
+
+/**
+ * Two (or more) magnitudes per category, compared on one shared scale --
+ * cost basis next to market value, not a difference between them (that
+ * would be `divergingBars`). Series colors and labels are fixed and known
+ * ahead of time, so the legend lives in the surrounding HTML rather than
+ * being generated here.
+ */
+export function groupedBarsH(container, options) {
+  const {
+    rows = [],
+    series = [],
+    currency = "USD",
+    rowHeight = 34,
+    ariaLabel = "Grouped comparison",
+  } = options;
+
+  if (!rows.length || !series.length) {
+    emptyState(container, "Nothing to show.");
+    return;
+  }
+
+  const tooltip = attachTooltip(container);
+
+  responsive(container, (width) => {
+    const height = rows.length * rowHeight + 8;
+    const longestLabel = Math.max(...rows.map((r) => textWidth(r.label, 12)));
+    const left = Math.min(Math.max(72, longestLabel + 12), Math.max(90, width * 0.3));
+    const plotW = Math.max(10, width - left - 14);
+    const max = Math.max(
+      ...rows.flatMap((r) => series.map((s) => Math.abs(Number(r[s.key]) || 0))),
+      1,
+    );
+
+    const svg = el("svg", {
+      viewBox: `0 0 ${width} ${height}`, width, height,
+      role: "img", "aria-label": ariaLabel,
+    });
+
+    // Thin paired bars -- rowHeight has to fit `series.length` of them plus
+    // the gaps between, so this stays well under the 24px bar-thickness cap.
+    const gapBetween = 3;
+    const barH = Math.max(4, Math.floor((rowHeight - 10 - gapBetween * (series.length - 1)) / series.length));
+    const groupHeight = series.length * barH + (series.length - 1) * gapBetween;
+
+    rows.forEach((row, i) => {
+      const rowTop = i * rowHeight;
+      const startY = rowTop + (rowHeight - groupHeight) / 2;
+      const group = el("g");
+
+      group.appendChild(
+        el("text", {
+          x: left - 10, y: rowTop + rowHeight / 2 + 4, "text-anchor": "end",
+          class: "mark-label strong",
+        }, row.label),
+      );
+
+      series.forEach((s, si) => {
+        const value = Number(row[s.key]) || 0;
+        const y = startY + si * (barH + gapBetween);
+        const w = Math.max(2, (Math.abs(value) / max) * plotW);
+        group.appendChild(
+          el("path", { d: barPath(left, y, w, barH, "right", 3), fill: token(s.color) }),
+        );
+      });
+
+      const hit = el("rect", {
+        x: 0, y: rowTop, width, height: rowHeight, fill: "transparent",
+      });
+      hit.addEventListener("pointerenter", () => {
+        group.querySelectorAll("path").forEach((p) => p.setAttribute("fill-opacity", 0.82));
+      });
+      hit.addEventListener("pointermove", (event) => {
+        const box = svg.getBoundingClientRect();
+        const seriesRows = series
+          .map((s) => `<div class="t-row"><span>${s.label}</span><span>${fmt.currency(row[s.key] ?? 0, currency)}</span></div>`)
+          .join("");
+        tooltip.show(
+          `<div class="t-title">${row.label}${row.description ? ` &middot; ${row.description}` : ""}</div>${seriesRows}`,
+          event.clientX - box.left,
+          rowTop + rowHeight / 2,
+        );
+      });
+      hit.addEventListener("pointerleave", () => {
+        group.querySelectorAll("path").forEach((p) => p.removeAttribute("fill-opacity"));
+        tooltip.hide();
+      });
+      group.appendChild(hit);
+      svg.appendChild(group);
+    });
+
+    svg.appendChild(
+      el("line", {
+        x1: left, x2: left, y1: 2, y2: height - 4,
+        stroke: token("--axis"), "stroke-width": 1,
+      }),
+    );
+
+    container.querySelector("svg")?.remove();
+    container.insertBefore(svg, container.firstChild);
+  });
+}
+
+export const internals = { niceTicks, barPath, textWidth, arcPath };

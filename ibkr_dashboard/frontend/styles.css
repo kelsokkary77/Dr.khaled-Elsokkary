@@ -16,9 +16,21 @@
   --axis: #c3c2b7;
   --border: rgba(11, 11, 11, 0.10);
 
-  --series-1: #2a78d6;           /* blue   */
-  --series-2: #eb6834;           /* orange */
-  --series-3: #1baf7a;           /* aqua   */
+  /* Full 8-slot categorical order. Slots 1-3 do most of the work (allocation,
+     P&L); 4-8 exist for charts that can show more identities at once (the
+     sector-colored holdings bar). Fixed order, validated as a set -- never
+     reassigned or cycled based on what happens to be visible. */
+  --series-1: #2a78d6;           /* blue    */
+  --series-2: #eb6834;           /* orange  */
+  --series-3: #1baf7a;           /* aqua    */
+  --series-4: #eda100;           /* yellow  */
+  --series-5: #e87ba4;           /* magenta */
+  --series-6: #008300;           /* green   */
+  --series-7: #4a3aa7;           /* violet  */
+  --series-8: #e34948;           /* red     */
+  /* Catch-all bucket color (an aggregated "Other" slice) -- deliberately not
+     one of the 8 identities above, so it never impersonates a real one. */
+  --series-other: #898781;
 
   --pos: #2a78d6;                /* diverging pole: gain  */
   --neg: #e34948;                /* diverging pole: loss  */
@@ -50,6 +62,12 @@
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --series-other: #898781;
     --pos: #3987e5;
     --neg: #e66767;
     --mid: #383835;
@@ -72,6 +90,12 @@
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-other: #898781;
   --pos: #3987e5;
   --neg: #e66767;
   --mid: #383835;
@@ -333,7 +357,27 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(
   color: var(--text-secondary);
 }
 .legend .item { display: inline-flex; align-items: center; gap: 6px; }
-.legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
+.legend .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+
+/* Donut chart: a fixed-size ring beside a legend that carries every value
+   as text. The legend wraps like a paragraph of pills rather than one item
+   per line -- with every open position as its own slice, a forced single
+   column would run for dozens of rows and dwarf the ring beside it. */
+.donut-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 28px;
+}
+.donut-ring { flex: 0 0 auto; }
+.donut-ring svg { display: block; }
+.donut-legend {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin-top: 4px;
+  align-content: flex-start;
+}
+.donut-legend .item { font-size: 13px; color: var(--text-primary); }
 
 .empty {
   padding: 28px 0;

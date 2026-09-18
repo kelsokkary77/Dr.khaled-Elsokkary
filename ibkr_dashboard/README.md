@@ -17,8 +17,11 @@ and never places orders — every IBKR call it makes is read-only.
 | **Hero + tiles** | Net liquidation value, day change, cash, securities, unrealized and realized P&L, top-5 weight, max drawdown |
 | **NAV chart** | Net liquidation over time, with crosshair, tooltip and 1M/3M/6M/1Y/All ranges |
 | **Allocation** | Market value by asset class, sector, currency or country |
-| **Largest holdings** | Top 10 positions by market value |
-| **P&L by position** | Diverging bars — gains right, losses left, on one shared scale |
+| **Holdings by market value** | Every open position, largest first |
+| **Position weight** | Donut of every holding's share of the book — no top-N, no "Other" bucket |
+| **Sector allocation** | Donut of market value by sector, covering every position — % and $ per sector |
+| **P&L by position** | Diverging bars — gains right, losses left, on one shared scale — every position |
+| **Cost basis vs. market value** | Two bars per holding — what was paid next to what it's worth now — every position |
 | **Open positions** | Sortable table: quantity, mark, average cost, market value, weight, P&L, return |
 | **Cash balances** | Per-currency balance, base-currency equivalent, share of cash |
 | **Recent trades** | Date, side, quantity, price, proceeds, commission, realized P&L |
@@ -242,8 +245,23 @@ Providers all return the same `PortfolioSnapshot`, so analytics and the UI never
 know which source they are looking at. Adding a source means writing one class.
 
 The frontend has **no dependencies and loads nothing from a CDN** — the charts
-are hand-built SVG. A dashboard that reads a brokerage account should not ship
-third-party JavaScript, and it works with the network off.
+are hand-built SVG (line, horizontal bar, diverging bar, grouped bar, donut). A
+dashboard that reads a brokerage account should not ship third-party
+JavaScript, and it works with the network off.
+
+Every position-level chart and table shows **every open position** — nothing
+is capped at a "top 10" or a "top 5." Labels are free text from the broker
+(a sector name, a ticker), so colors are assigned by identity for whatever is
+actually on screen rather than matched against a fixed list of expected
+names — that's what keeps two differently named categories from ever landing
+on the same color by accident. Past 8 distinct entries, colors repeat (never
+between two *adjacent* slices in a ring, which is the one guarantee that
+form actually needs); the legend and the **Table** toggle carry the exact
+figure for every entry regardless, so a repeated hue costs a glance, not a
+number. With a large book, expect the two donuts (Position weight, Sector
+allocation) to show many thin slices for the smaller holdings — that is
+the trade-off of showing everything rather than summarizing the tail into
+an "Other" bucket.
 
 ---
 
@@ -257,6 +275,13 @@ python3 -m pytest tests/ -q
 87 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, and the API tests run the demo provider through
 FastAPI's `TestClient`.
+
+The sector-colored and part-to-whole charts were additionally stress-tested
+against a real 41-holding, 9-sector portfolio export (not the 12-holding demo
+data) by intercepting `/api/dashboard` in the browser — confirming every
+holding and every sector renders correctly at that scale, every sector gets
+its own distinct color, and the layout holds at both desktop and phone
+width. No real portfolio data or screenshot of it is included in this repo.
 
 ### Continuous integration
 

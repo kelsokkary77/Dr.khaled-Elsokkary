@@ -72,12 +72,34 @@
 
     <section class="card">
       <header>
-        <h2>Largest holdings</h2>
+        <h2>Holdings by market value</h2>
         <p class="sub" id="holdings-sub"></p>
         <span class="spacer"></span>
         <button data-view="holdings" aria-pressed="false">Table</button>
       </header>
       <div class="chart" id="holdings-chart"></div>
+    </section>
+  </div>
+
+  <div class="grid-2">
+    <section class="card">
+      <header>
+        <h2>Position weight</h2>
+        <p class="sub" id="weight-sub"></p>
+        <span class="spacer"></span>
+        <button data-view="weight" aria-pressed="false">Table</button>
+      </header>
+      <div class="chart" id="weight-chart"></div>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Sector allocation</h2>
+        <p class="sub" id="sectorpie-sub"></p>
+        <span class="spacer"></span>
+        <button data-view="sectorpie" aria-pressed="false">Table</button>
+      </header>
+      <div class="chart" id="sectorpie-chart"></div>
     </section>
   </div>
 
@@ -95,6 +117,22 @@
       <span class="item"><span class="swatch" style="background:var(--pos)"></span>Gain</span>
       <span class="item"><span class="swatch" style="background:var(--neg)"></span>Loss</span>
       <span class="item" style="color:var(--text-muted)">Bars grow from the zero line; values are signed.</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <header>
+      <h2>Cost basis vs. market value</h2>
+      <p class="sub" id="costval-sub"></p>
+      <span class="spacer"></span>
+      <button data-view="costval" aria-pressed="false">Table</button>
+    </header>
+    <div class="chart" id="costval-chart"></div>
+    <!-- Two magnitudes per holding, so a legend is present -- the same rule
+         as the P&L chart's Gain/Loss key above. -->
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--series-1)"></span>Cost basis</span>
+      <span class="item"><span class="swatch" style="background:var(--series-2)"></span>Market value</span>
     </div>
   </section>
 

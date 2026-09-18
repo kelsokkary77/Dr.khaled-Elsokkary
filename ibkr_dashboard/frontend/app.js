@@ -1,4 +1,4 @@
-import { fmt, lineChart, barsH, divergingBars, teardown } from "./charts.js";
+import { fmt, lineChart, barsH, divergingBars, donutChart, groupedBarsH, teardown } from "./charts.js";
 
 const state = {
   data: null,
@@ -116,7 +116,10 @@ function render() {
   renderNav(d);
   renderAllocation(d);
   renderHoldings(d);
+  renderPositionWeight(d);
+  renderSectorAllocation(d);
   renderPnl(d);
+  renderCostBasisVsValue(d);
   renderPositionsTable(d);
   renderCashTable(d);
   renderTradesTable(d);
@@ -239,6 +242,34 @@ function renderNav(d) {
   });
 }
 
+/* -------------------------------------------------------- category color */
+
+/**
+ * Assign each distinct label its own categorical slot, in the order given
+ * -- typically "largest first", so the biggest slice reads as slot 1.
+ * Labels are free text (a sector name spelled however a broker statement
+ * spells it, a ticker symbol), so this maps by identity rather than
+ * matching against a fixed list of expected names: two different labels
+ * never end up sharing a color just because neither was anticipated.
+ *
+ * Every distinct label gets a real slot -- nothing is folded into a mute
+ * "Other" bucket here, because the caller means to show every one of them,
+ * not to summarize a long tail. Past the 8 physically distinguishable
+ * hues, slots repeat (slot 9 reuses slot 1's color); since these charts
+ * always carry a legend and a table view, identity is never resting on
+ * hue alone, so a repeated color past the eighth entry costs legibility
+ * at a glance, not correctness. Adjacent entries in the caller's own
+ * order never repeat, since consecutive indices are never in the same
+ * mod-8 class -- the one guarantee a ring or an ordered bar list needs.
+ */
+function assignCategoryColors(labelsInOrder) {
+  const colors = new Map();
+  labelsInOrder.forEach((label, i) => {
+    colors.set(label, `--series-${(i % 8) + 1}`);
+  });
+  return colors;
+}
+
 /* ------------------------------------------------------------- allocation */
 
 const DIM_LABEL = {
@@ -249,7 +280,7 @@ const DIM_LABEL = {
 };
 
 function renderAllocation(d) {
-  const rows = (d.allocation[state.allocationDim] || []).slice(0, 12);
+  const rows = d.allocation[state.allocationDim] || [];
   $("#alloc-sub").textContent = `${rows.length} ${DIM_LABEL[state.allocationDim]} groups`;
 
   if (state.views.alloc === "table") {
@@ -272,13 +303,13 @@ function renderAllocation(d) {
 }
 
 function renderHoldings(d) {
-  const rows = d.positions.slice(0, 10).map((p) => ({
+  const rows = d.positions.map((p) => ({
     label: p.symbol,
     value: p.market_value,
     weight_pct: p.weight_pct,
     count: 1,
   }));
-  $("#holdings-sub").textContent = `Top ${rows.length} of ${d.positions.length} positions`;
+  $("#holdings-sub").textContent = `All ${rows.length} positions`;
 
   if (state.views.holdings === "table") {
     renderTableView("#holdings-chart", ["Symbol", "Market value", "Weight"],
@@ -289,7 +320,7 @@ function renderHoldings(d) {
   barsH(showChartView("#holdings-chart"), {
     rows,
     currency: state.currency,
-    ariaLabel: "Top holdings by market value",
+    ariaLabel: "Holdings by market value",
     secondary: (row) => `${fmt.pct(row.weight_pct, 1)} of book`,
   });
 }
@@ -297,8 +328,7 @@ function renderHoldings(d) {
 function renderPnl(d) {
   const rows = d.positions
     .slice()
-    .sort((a, b) => b.unrealized_pnl - a.unrealized_pnl)
-    .slice(0, 14);
+    .sort((a, b) => b.unrealized_pnl - a.unrealized_pnl);
 
   const gains = rows.filter((r) => r.unrealized_pnl >= 0).length;
   $("#pnl-sub").textContent = `${gains} in profit · ${rows.length - gains} in loss`;
@@ -315,6 +345,93 @@ function renderPnl(d) {
   }
 
   divergingBars(showChartView("#pnl-chart"), { rows, currency: state.currency });
+}
+
+/** Part-to-whole: every open position's share of the book. Every holding
+ * gets its own slice -- nothing is folded into an "Other" bucket -- so a
+ * large book means many thin slices; the legend and the Table toggle carry
+ * the exact figures regardless of how thin a slice gets. */
+function renderPositionWeight(d) {
+  const sorted = d.positions.slice().sort((a, b) => b.market_value - a.market_value);
+  const colors = assignCategoryColors(sorted.map((p) => p.symbol));
+  const rows = sorted.map((p) => ({ label: p.symbol, value: p.market_value, color: colors.get(p.symbol) }));
+
+  $("#weight-sub").textContent = `All ${rows.length} positions`;
+
+  if (state.views.weight === "table") {
+    const total = rows.reduce((sum, r) => sum + r.value, 0) || 1;
+    renderTableView("#weight-chart", ["Holding", "Market value", "Weight"],
+      rows.map((r) => [r.label, fmt.currency(r.value, state.currency), fmt.pct((r.value / total) * 100, 1)]));
+    return;
+  }
+
+  donutChart(showChartView("#weight-chart"), {
+    rows,
+    currency: state.currency,
+    ariaLabel: "Portfolio weight by holding",
+  });
+}
+
+/** Part-to-whole by sector: every position's market value, grouped into its
+ * sector -- so this represents the entire book even though the ring only
+ * ever has a handful of slices. Sourced from the same allocation totals as
+ * the Allocation card's own sector view, not re-derived from a top-N list. */
+function renderSectorAllocation(d) {
+  const sectorRows = d.allocation.by_sector || [];
+  const colors = assignCategoryColors(sectorRows.map((r) => r.label));
+  const rows = sectorRows.map((r) => ({ label: r.label, value: r.value, color: colors.get(r.label) }));
+
+  $("#sectorpie-sub").textContent = `${rows.length} ${rows.length === 1 ? "sector" : "sectors"} · ${d.positions.length} positions`;
+
+  if (state.views.sectorpie === "table") {
+    renderTableView("#sectorpie-chart", ["Sector", "Market value", "Weight", "Holdings"],
+      sectorRows.map((r) => [r.label, fmt.currency(r.value, state.currency), fmt.pct(r.weight_pct, 1), String(r.count)]));
+    return;
+  }
+
+  donutChart(showChartView("#sectorpie-chart"), {
+    rows,
+    currency: state.currency,
+    ariaLabel: "Portfolio market value by sector",
+  });
+}
+
+/** Two magnitudes per holding, side by side rather than netted -- what was
+ * paid next to what it is worth now. The diverging P&L chart already shows
+ * the *difference*; this shows the two numbers that difference comes from. */
+function renderCostBasisVsValue(d) {
+  const rows = d.positions
+    .slice()
+    .sort((a, b) => b.market_value - a.market_value)
+    .map((p) => ({
+      label: p.symbol,
+      description: p.description,
+      cost_basis: p.cost_basis,
+      market_value: p.market_value,
+    }));
+
+  $("#costval-sub").textContent = `All ${rows.length} positions`;
+
+  if (state.views.costval === "table") {
+    renderTableView("#costval-chart", ["Symbol", "Cost basis", "Market value", "Change"],
+      rows.map((r) => [
+        r.label,
+        fmt.currency(r.cost_basis, state.currency),
+        fmt.currency(r.market_value, state.currency),
+        fmt.signedPct(r.cost_basis ? (r.market_value / r.cost_basis - 1) * 100 : 0),
+      ]));
+    return;
+  }
+
+  groupedBarsH(showChartView("#costval-chart"), {
+    rows,
+    currency: state.currency,
+    ariaLabel: "Cost basis compared with market value",
+    series: [
+      { key: "cost_basis", label: "Cost basis", color: "--series-1" },
+      { key: "market_value", label: "Market value", color: "--series-2" },
+    ],
+  });
 }
 
 /**
@@ -521,9 +638,15 @@ function initControls() {
       state.views[chart] = next;
       btn.setAttribute("aria-pressed", String(next === "table"));
       btn.textContent = next === "table" ? "Chart" : "Table";
-      ({ nav: renderNav, alloc: renderAllocation, holdings: renderHoldings, pnl: renderPnl }[
-        chart
-      ])(state.data);
+      ({
+        nav: renderNav,
+        alloc: renderAllocation,
+        holdings: renderHoldings,
+        weight: renderPositionWeight,
+        sectorpie: renderSectorAllocation,
+        pnl: renderPnl,
+        costval: renderCostBasisVsValue,
+      }[chart])(state.data);
     });
   });
 }
