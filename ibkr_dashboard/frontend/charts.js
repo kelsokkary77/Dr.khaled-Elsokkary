@@ -188,12 +188,33 @@ function responsive(container, draw) {
     hideTooltip(container.querySelector(".tooltip"));
     draw(width);
   };
-  if (container._vizObserver) container._vizObserver.disconnect();
+  // Drop any previous wiring first, so a container is never observed twice.
+  teardown(container);
   const observer = new ResizeObserver(run);
   observer.observe(container);
-  container._vizObserver = observer;
   document.addEventListener("themechange", run);
+  container._vizTeardown = () => {
+    observer.disconnect();
+    document.removeEventListener("themechange", run);
+  };
   run();
+}
+
+/**
+ * Detach a chart from its container.
+ *
+ * Whoever replaces a chart's contents must call this first. The resize
+ * observer fires on the size change that the replacement itself causes, and
+ * an attached chart would answer by drawing itself straight back in over the
+ * top -- which is what made the table view render with the chart still above
+ * it. The theme listener is released here too; without this it accumulated
+ * one handler per render.
+ */
+export function teardown(container) {
+  if (container && container._vizTeardown) {
+    container._vizTeardown();
+    container._vizTeardown = null;
+  }
 }
 
 function emptyState(container, message) {

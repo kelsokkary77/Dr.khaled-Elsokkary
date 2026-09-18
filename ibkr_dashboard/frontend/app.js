@@ -1,4 +1,4 @@
-import { fmt, lineChart, barsH, divergingBars } from "./charts.js";
+import { fmt, lineChart, barsH, divergingBars, teardown } from "./charts.js";
 
 const state = {
   data: null,
@@ -231,7 +231,7 @@ function renderNav(d) {
     return;
   }
 
-  lineChart($("#nav-chart"), {
+  lineChart(showChartView("#nav-chart"), {
     points,
     height: 300,
     currency: state.currency,
@@ -263,7 +263,7 @@ function renderAllocation(d) {
     return;
   }
 
-  barsH($("#alloc-chart"), {
+  barsH(showChartView("#alloc-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: `Allocation by ${DIM_LABEL[state.allocationDim]}`,
@@ -286,7 +286,7 @@ function renderHoldings(d) {
     return;
   }
 
-  barsH($("#holdings-chart"), {
+  barsH(showChartView("#holdings-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: "Top holdings by market value",
@@ -314,12 +314,28 @@ function renderPnl(d) {
     return;
   }
 
-  divergingBars($("#pnl-chart"), { rows, currency: state.currency });
+  divergingBars(showChartView("#pnl-chart"), { rows, currency: state.currency });
+}
+
+/**
+ * Hand a chart container back to the chart.
+ *
+ * A chart and its table view both own the same container, and the chart
+ * renderers only clear a stale <svg>. Without this, toggling back from the
+ * table left the table in place and the chart was drawn above it.
+ */
+function showChartView(selector) {
+  const container = $(selector);
+  container.querySelector(".table-scroll")?.remove();
+  return container;
 }
 
 /** The table view every chart falls back to -- identity is never color-only. */
 function renderTableView(selector, headers, rows) {
   const container = $(selector);
+  // Detach the chart before replacing the contents -- see teardown() in
+  // charts.js for why an attached chart would redraw itself over this.
+  teardown(container);
   container.querySelector("svg")?.remove();
   container.querySelector(".tooltip")?.remove();
   container.innerHTML = `<div class="table-scroll"><table>
