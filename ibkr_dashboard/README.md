@@ -61,6 +61,14 @@ unzip it, and open the `ibkr_dashboard` folder in a terminal.
 
 ### 3. Start it
 
+**Mac, no terminal needed:** double-click **`Start Dashboard.command`** in the
+`ibkr_dashboard` folder. It opens a Terminal window, starts the server, and
+opens your browser to the dashboard automatically. The first time, macOS may
+warn that it's from an unidentified developer — right-click the file, choose
+**Open**, then confirm. To stop the dashboard, close that Terminal window.
+
+**Everyone else, or from the command line:**
+
 ```bash
 ./run.sh
 ```
@@ -238,6 +246,7 @@ ibkr_dashboard/
 │   ├── service.py       Sync orchestration
 │   └── main.py          FastAPI routes
 ├── frontend/            index.html, app.js, charts.js, styles.css
+├── Start Dashboard.command  Double-click launcher for macOS (no terminal)
 └── tests/
 ```
 
