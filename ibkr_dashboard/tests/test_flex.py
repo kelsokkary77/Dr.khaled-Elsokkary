@@ -201,6 +201,68 @@ def test_identical_trades_in_different_accounts_are_both_kept(combined):
     assert len(matching) == 2
 
 
+# IBKR can scope a single Activity Flex Query to cover more than one linked
+# account -- one query response then carries multiple <FlexStatement> blocks,
+# rather than the user needing a second query ID per account. Since merging
+# already operates per <FlexStatement> rather than per query, this needs no
+# separate code path -- this test is here to prove that, not to add one.
+ONE_QUERY_TWO_ACCOUNTS_STATEMENT = """<FlexQueryResponse queryName="Combined" type="AF">
+ <FlexStatements count="2">
+  <FlexStatement accountId="U1234567" fromDate="2026-01-01" toDate="2026-09-16">
+   <AccountInformation accountId="U1234567" acctAlias="Main" currency="USD"
+                       accountType="INDIVIDUAL"/>
+   <EquitySummaryInBase>
+     <EquitySummaryByReportDateInBase reportDate="2026-09-16" cash="1000" stock="9500" total="10500"/>
+   </EquitySummaryInBase>
+   <CashReport>
+     <CashReportCurrency currency="BASE_SUMMARY" endingCash="1000"/>
+     <CashReportCurrency currency="USD" endingCash="1000" endingCashInBase="1000"/>
+   </CashReport>
+   <OpenPositions>
+     <OpenPosition currency="USD" fxRateToBase="1" assetCategory="STK" symbol="AAPL"
+       description="APPLE INC" conid="265598" listingExchange="NASDAQ" position="30"
+       markPrice="250" positionValue="7500" costBasisPrice="180" costBasisMoney="5400"
+       fifoPnlUnrealized="2100" multiplier="1" subCategory="COMMON" issuerCountryCode="US"/>
+   </OpenPositions>
+   <Trades/>
+  </FlexStatement>
+  <FlexStatement accountId="U7654321" fromDate="2026-01-01" toDate="2026-09-16">
+   <AccountInformation accountId="U7654321" acctAlias="Linked" currency="USD"
+                       accountType="INDIVIDUAL"/>
+   <EquitySummaryInBase>
+     <EquitySummaryByReportDateInBase reportDate="2026-09-16" cash="500" stock="4700" total="5200"/>
+   </EquitySummaryInBase>
+   <CashReport>
+     <CashReportCurrency currency="BASE_SUMMARY" endingCash="500"/>
+     <CashReportCurrency currency="USD" endingCash="500" endingCashInBase="500"/>
+   </CashReport>
+   <OpenPositions>
+     <OpenPosition currency="USD" fxRateToBase="1" assetCategory="STK" symbol="AAPL"
+       description="APPLE INC" conid="265598" listingExchange="NASDAQ" position="10"
+       markPrice="250" positionValue="2500" costBasisPrice="200" costBasisMoney="2000"
+       fifoPnlUnrealized="500" multiplier="1" subCategory="COMMON" issuerCountryCode="US"/>
+   </OpenPositions>
+   <Trades/>
+  </FlexStatement>
+ </FlexStatements>
+</FlexQueryResponse>"""
+
+
+def test_one_query_covering_both_accounts_merges_correctly():
+    """A single IBKR_FLEX_QUERY_IDS entry, scoped by IBKR to include both
+    linked accounts, needs no separate handling from two query IDs."""
+    snapshot = PortfolioSnapshot(provider="flex")
+    provider = flex.FlexProvider(Settings())
+    provider._merge(snapshot, ONE_QUERY_TWO_ACCOUNTS_STATEMENT, "999", [])
+    flex._finalize_summary(snapshot, "USD")
+
+    assert snapshot.summary.account_id == "U1234567 + U7654321"
+    aapl = next(p for p in snapshot.positions if p.symbol == "AAPL")
+    assert aapl.quantity == pytest.approx(40.0)
+    assert aapl.market_value == pytest.approx(10_000.0)
+    assert snapshot.summary.net_liquidation == pytest.approx(15_700.0)
+
+
 def test_failure_response_is_described_for_a_human():
     message = flex._describe_failure(flex._parse(FAILURE), "query 1")
     assert "1012" in message and "Token has expired" in message
