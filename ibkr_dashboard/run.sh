@@ -68,6 +68,24 @@ if [ ! -d .venv ]; then
   ./.venv/bin/pip install --quiet -r requirements.txt
 fi
 
+# IBKR_HOST/IBKR_PORT decide what uvicorn binds to, which has to be a shell
+# variable before Python ever starts -- so .env needs loading here too, not
+# only inside backend/config.py. Same precedence as the Python side: a value
+# already set in the shell (e.g. `IBKR_HOST=0.0.0.0 ./run.sh`) wins over .env.
+if [ -f .env ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key="$(echo "${line%%=*}" | xargs)"
+    value="$(echo "${line#*=}" | xargs)"
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+    [ -z "$key" ] && continue
+    if [ -z "${!key+x}" ]; then
+      export "$key=$value"
+    fi
+  done < .env
+fi
+
 PORT="${IBKR_PORT:-8787}"
 HOST="${IBKR_HOST:-127.0.0.1}"
 
