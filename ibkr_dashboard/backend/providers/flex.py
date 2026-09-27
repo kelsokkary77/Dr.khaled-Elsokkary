@@ -160,11 +160,9 @@ class FlexProvider(BaseProvider):
 
         for statement in statements:
             info = statement.find(".//AccountInformation")
-            account_id = ""
+            statement_account_id = ""
             if info is not None:
-                account_id = _attr(info, "accountId")
-                if account_id:
-                    account_ids.append(account_id)
+                statement_account_id = _attr(info, "accountId")
                 snapshot.summary.account_alias = (
                     _attr(info, "acctAlias", "alias") or snapshot.summary.account_alias
                 )
@@ -175,10 +173,27 @@ class FlexProvider(BaseProvider):
                     _attr(info, "currency") or snapshot.summary.base_currency
                 )
 
-            snapshot.positions.extend(_parse_positions(statement, account_id))
-            snapshot.cash.extend(_parse_cash(statement, account_id))
-            snapshot.trades.extend(_parse_trades(statement, account_id))
-            snapshot.nav_history.extend(_parse_nav(statement, account_id))
+            # A Flex query scoped to several linked accounts can put them in
+            # separate <FlexStatement> blocks (statement_account_id covers
+            # every row below), or -- for some account structures -- in one
+            # block where each row carries its own accountId instead. Reading
+            # the row's own accountId first (falling back to the statement's)
+            # handles both, so an overlapping holding is attributed to the
+            # right account rather than every row in the block being tagged
+            # with whichever account the statement header happened to name.
+            new_positions = _parse_positions(statement, statement_account_id)
+            new_cash = _parse_cash(statement, statement_account_id)
+            new_trades = _parse_trades(statement, statement_account_id)
+            new_nav = _parse_nav(statement, statement_account_id)
+
+            for row in (*new_positions, *new_cash, *new_trades, *new_nav):
+                if row.account_id and row.account_id not in account_ids:
+                    account_ids.append(row.account_id)
+
+            snapshot.positions.extend(new_positions)
+            snapshot.cash.extend(new_cash)
+            snapshot.trades.extend(new_trades)
+            snapshot.nav_history.extend(new_nav)
 
         _dedupe(snapshot)
 
@@ -227,7 +242,13 @@ def _parse_positions(statement: ET.Element, account_id: str = "") -> list[Positi
                 cost_basis=_num(node, "costBasisMoney"),
                 unrealized_pnl=_num(node, "fifoPnlUnrealized", "unrealizedPnl"),
                 fx_rate_to_base=_num(node, "fxRateToBase") or 1.0,
-                account_id=account_id,
+                # A row's own accountId (present when a statement mixes rows
+                # from more than one linked account) always wins over the
+                # statement-wide default -- otherwise every row in a mixed
+                # statement gets attributed to whichever account the header
+                # named, and an overlapping holding silently loses one
+                # account's shares during dedup instead of being summed.
+                account_id=_attr(node, "accountId") or account_id,
             )
         )
     return out
@@ -249,7 +270,7 @@ def _parse_cash(statement: ET.Element, account_id: str = "") -> list[CashBalance
                 currency=currency,
                 amount=amount,
                 amount_base=_num(node, "endingCashInBase") or amount,
-                account_id=account_id,
+                account_id=_attr(node, "accountId") or account_id,
             )
         )
     return out
@@ -273,7 +294,7 @@ def _parse_trades(statement: ET.Element, account_id: str = "") -> list[Trade]:
                 realized_pnl=_num(node, "fifoPnlRealized", "realizedPnl"),
                 currency=_attr(node, "currency") or "USD",
                 asset_class=_attr(node, "assetCategory") or "STK",
-                account_id=account_id,
+                account_id=_attr(node, "accountId") or account_id,
             )
         )
     out.sort(key=lambda t: t.trade_date, reverse=True)
@@ -292,7 +313,7 @@ def _parse_nav(statement: ET.Element, account_id: str = "") -> list[NavPoint]:
                 nav=total,
                 cash=_num(node, "cash", "cashLong"),
                 securities=_num(node, "stock", "stockLong"),
-                account_id=account_id,
+                account_id=_attr(node, "accountId") or account_id,
             )
         )
     out.sort(key=lambda p: p.as_of)
