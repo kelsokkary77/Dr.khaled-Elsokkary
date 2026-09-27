@@ -78,6 +78,13 @@ Then open **<http://127.0.0.1:8787>**. Press **Ctrl+C** in the terminal to stop.
 The first run takes about half a minute: it creates a virtualenv and installs
 three dependencies. After that it starts in a couple of seconds.
 
+### Getting updates (Mac, no terminal needed)
+
+Double-click **`Update.command`** in the `ibkr_dashboard` folder any time to
+pull the latest version — it runs `git pull` for you and tells you plainly
+whether it worked, there was nothing new, or something needs your attention,
+then waits for a key press so the window doesn't vanish before you've read it.
+
 **Windows**, which has no bash, run these three lines instead:
 
 ```bat
@@ -330,6 +337,7 @@ ibkr_dashboard/
 │   └── main.py          FastAPI routes
 ├── frontend/            index.html, app.js, charts.js, styles.css
 ├── Start Dashboard.command  Double-click launcher for macOS (no terminal)
+├── Update.command       Double-click `git pull` for macOS (no terminal)
 └── tests/
 ```
 
