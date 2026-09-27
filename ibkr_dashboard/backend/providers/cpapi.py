@@ -37,6 +37,7 @@ from ..models import (
     utcnow_iso,
 )
 from .base import BaseProvider, ProviderError
+from ..sector_map import lookup_sector
 
 _MAX_POSITION_PAGES = 40  # 30 positions per page -> 1200 positions
 _HEADERS = {"User-Agent": "ibkr-dashboard/1.0", "Accept": "application/json"}
@@ -276,13 +277,21 @@ def _position_from_row(row: dict[str, Any]) -> Position:
     market_value = _num(row.get("mktValue"))
     avg_cost = _num(row.get("avgCost"))
     multiplier = _num(row.get("multiplier")) or 1.0
+    symbol = str(row.get("ticker") or row.get("contractDesc") or "?")
+    # The gateway's own sector/group is real IBKR classification data -- use
+    # it when present, and only fall back to the built-in table (see
+    # backend/sector_map.py) when IBKR left it blank.
+    sector = str(row.get("sector") or row.get("group") or "") or lookup_sector(symbol)
     return Position(
-        symbol=str(row.get("ticker") or row.get("contractDesc") or "?"),
+        symbol=symbol,
         description=str(row.get("name") or row.get("contractDesc") or ""),
         asset_class=str(row.get("assetClass") or "STK"),
         currency=str(row.get("currency") or "USD"),
         exchange=str(row.get("listingExchange") or ""),
-        sector=str(row.get("sector") or row.get("group") or "Unclassified"),
+        sector=sector,
+        # The gateway doesn't distinguish "Common Stock" from "ETF" the way
+        # Flex's subCategory does -- assetClass is the closest it has.
+        security_type=str(row.get("assetClass") or "Unclassified"),
         country=str(row.get("countryCode") or ""),
         conid=str(row.get("conid") or ""),
         quantity=quantity,

@@ -275,6 +275,17 @@ function assignCategoryColors(labelsInOrder) {
 const DIM_LABEL = {
   by_asset_class: "asset class",
   by_sector: "sector",
+  by_security_type: "security type",
+  by_currency: "currency",
+  by_country: "country",
+};
+
+/* Which Position field each allocation dimension groups by -- used to find
+   the holdings behind a group when it's clicked. */
+const DIM_FIELD = {
+  by_asset_class: "asset_class",
+  by_sector: "sector",
+  by_security_type: "security_type",
   by_currency: "currency",
   by_country: "country",
 };
@@ -299,6 +310,7 @@ function renderAllocation(d) {
     currency: state.currency,
     ariaLabel: `Allocation by ${DIM_LABEL[state.allocationDim]}`,
     secondary: (row) => `${fmt.pct(row.weight_pct, 1)} of book`,
+    onRowClick: (row) => openGroupDrilldown(state.allocationDim, row),
   });
 }
 
@@ -393,7 +405,61 @@ function renderSectorAllocation(d) {
     rows,
     currency: state.currency,
     ariaLabel: "Portfolio market value by sector",
+    onSliceClick: (row) => openGroupDrilldown("by_sector", { key: row.label, label: row.label, value: row.value }),
   });
+}
+
+/* -------------------------------------------------------------- drilldown */
+
+/** Every position belonging to one allocation group, with its share of that
+ * group's total value attached (distinct from weight_pct, which is its
+ * share of the whole book). */
+function positionsForGroup(dim, key) {
+  const field = DIM_FIELD[dim];
+  const matches = state.data.positions.filter((p) => (p[field] || "Unclassified") === key);
+  const groupTotal = matches.reduce((sum, p) => sum + Math.abs(p.market_value), 0) || 1;
+  return matches
+    .map((p) => ({ ...p, group_weight_pct: (Math.abs(p.market_value) / groupTotal) * 100 }))
+    .sort((a, b) => Math.abs(b.market_value) - Math.abs(a.market_value));
+}
+
+/** Clicking a sector, currency, etc. shows the holdings behind it, without
+ * leaving the dashboard. Groups with no positions (e.g. a pure cash slice
+ * in the asset-class view) say so plainly rather than showing an empty table. */
+function openGroupDrilldown(dim, row) {
+  const rows = positionsForGroup(dim, row.key ?? row.label);
+  const overlay = $("#drilldown-overlay");
+  $("#drilldown-title").textContent = row.label;
+
+  if (!rows.length) {
+    $("#drilldown-sub").textContent = `${fmt.currency(row.value, state.currency)} · not tied to individual holdings.`;
+    $("#drilldown-table").innerHTML = `<p class="empty">No open positions in this group -- likely a cash balance.</p>`;
+    overlay.hidden = false;
+    return;
+  }
+
+  $("#drilldown-sub").textContent =
+    `${rows.length} ${rows.length === 1 ? "holding" : "holdings"} · ${fmt.currency(row.value, state.currency)} · ${fmt.pct(row.weight_pct ?? (rows.reduce((s, p) => s + p.weight_pct, 0)), 1)} of book`;
+
+  $("#drilldown-table").innerHTML = `<table>
+    <thead><tr><th>Symbol</th><th>Name</th><th>Market value</th><th>Share of group</th><th>Share of book</th></tr></thead>
+    <tbody>${rows
+      .map(
+        (p) => `<tr>
+          <td class="sym">${escapeHtml(p.symbol)}</td>
+          <td class="desc" title="${escapeHtml(p.description)}">${escapeHtml(p.description)}</td>
+          <td>${fmt.currency(p.market_value, state.currency)}</td>
+          <td>${fmt.pct(p.group_weight_pct, 1)}</td>
+          <td>${fmt.pct(p.weight_pct, 1)}</td>
+        </tr>`,
+      )
+      .join("")}</tbody>
+  </table>`;
+  overlay.hidden = false;
+}
+
+function closeGroupDrilldown() {
+  $("#drilldown-overlay").hidden = true;
 }
 
 /** Two magnitudes per holding, side by side rather than netted -- what was
@@ -612,6 +678,14 @@ function renderFooter(d) {
 
 function initControls() {
   $("#sync").addEventListener("click", () => loadDashboard({ refresh: true }));
+
+  $("#drilldown-close").addEventListener("click", closeGroupDrilldown);
+  $("#drilldown-overlay").addEventListener("click", (event) => {
+    if (event.target.id === "drilldown-overlay") closeGroupDrilldown();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("#drilldown-overlay").hidden) closeGroupDrilldown();
+  });
 
   $$("[data-range]").forEach((btn) => {
     btn.addEventListener("click", () => {

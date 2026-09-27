@@ -16,10 +16,10 @@ and never places orders — every IBKR call it makes is read-only.
 |---|---|
 | **Hero + tiles** | Net liquidation value, day change, cash, securities, unrealized and realized P&L, top-5 weight, max drawdown |
 | **NAV chart** | Net liquidation over time, with crosshair, tooltip and 1M/3M/6M/1Y/All ranges |
-| **Allocation** | Market value by asset class, sector, currency or country |
+| **Allocation** | Market value by asset class, sector, security type, currency or country — click a bar to see the holdings behind it |
 | **Holdings by market value** | Every open position, largest first |
 | **Position weight** | Donut of every holding's share of the book — no top-N, no "Other" bucket |
-| **Sector allocation** | Donut of market value by sector, covering every position — % and $ per sector |
+| **Sector allocation** | Donut of market value by real sector (Technology, Healthcare, ...), covering every position — click a slice or legend entry to see the holdings in it |
 | **P&L by position** | Diverging bars — gains right, losses left, on one shared scale — every position |
 | **Cost basis vs. market value** | Two bars per holding — what was paid next to what it's worth now — every position |
 | **Open positions** | Sortable table: quantity, mark, average cost, market value, weight, P&L, return |
@@ -259,6 +259,35 @@ time-weighted return, use IBKR's own PortfolioAnalyst report.
 
 ---
 
+## Sector vs. security type
+
+These are two different classifications, both shown in the Allocation card
+and used elsewhere in the dashboard:
+
+| | Examples | Where it comes from |
+|---|---|---|
+| **Sector** | Technology, Healthcare, Financials, Energy | A built-in lookup table (`backend/sector_map.py`), keyed by ticker. On **Client Portal**, IBKR's own live sector is used instead when present, since that's real data straight from the broker. |
+| **Security type** | Common Stock, ETF, ADR, Preferred | **Flex**: IBKR's own `subCategory` field. **Client Portal**: falls back to asset class, since the gateway doesn't distinguish ETF from Common Stock the way Flex does. |
+
+**Neither the Flex Web Service nor the Client Portal Flex export includes a
+real sector field at all** — this was checked against IBKR's own Flex XML
+schema, not assumed. That's why Sector needs a lookup table for Flex users:
+it's the only way to show "Technology" instead of "Common Stock" without
+running a second, live connection to IBKR just for classification.
+
+The table covers a broad set of common US large-caps and popular ETFs, not
+every ticker that exists — anything it doesn't recognize shows as
+**Unclassified** rather than a guess. To add a missing one, open
+`backend/sector_map.py` and add a line; it's a plain Python dictionary, no
+build step needed. Ticker punctuation is normalized, so `"BRK.B"`,
+`"BRK-B"` and `"BRK B"` all match one entry.
+
+Click any sector (or any other Allocation group — currency, country, asset
+class) to see the holdings inside it, with each one's share of that group
+and of the whole book.
+
+---
+
 ## API
 
 The frontend is just a client of these. Everything returns JSON.
@@ -295,6 +324,7 @@ ibkr_dashboard/
 │   │   ├── flex.py      Flex Web Service (XML, two-step polling)
 │   │   └── cpapi.py     Client Portal Web API (local gateway)
 │   ├── analytics.py     Allocation, concentration, drawdown, activity
+│   ├── sector_map.py    Built-in ticker -> sector lookup (see below)
 │   ├── store.py         SQLite snapshot cache + NAV history
 │   ├── service.py       Sync orchestration
 │   └── main.py          FastAPI routes
@@ -334,7 +364,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-92 tests, none of which touch the network: Flex parsing runs against
+103 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, and the API tests run the demo provider through
 FastAPI's `TestClient`.
 

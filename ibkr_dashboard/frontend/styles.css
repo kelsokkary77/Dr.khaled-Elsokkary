@@ -358,6 +358,13 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(
 }
 .legend .item { display: inline-flex; align-items: center; gap: 6px; }
 .legend .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+.legend .item.clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 5px;
+  margin: -2px -5px;
+}
+.legend .item.clickable:hover { background: var(--surface-sunken); }
 
 /* Donut chart: a fixed-size ring beside a legend that carries every value
    as text. The legend wraps like a paragraph of pills rather than one item
@@ -385,6 +392,50 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(
   color: var(--text-muted);
   font-size: 13px;
 }
+
+/* --------------------------------------------------------------- overlay */
+
+/* Drill-down: clicking a group (a sector, a currency, ...) shows the
+   holdings inside it, without navigating away from the dashboard. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px;
+  background: rgba(0, 0, 0, 0.4);
+  overflow-y: auto;
+}
+.overlay[hidden] { display: none; }
+.overlay-panel {
+  width: 100%;
+  max-width: 560px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+}
+.overlay-panel > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.overlay-panel h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.overlay-panel .close {
+  border: 0;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  padding: 2px 6px;
+  color: var(--text-muted);
+}
+.overlay-panel .close:hover { color: var(--text-primary); background: var(--surface-sunken); }
+.overlay-panel .sub { margin: 0 0 12px; font-size: 12px; color: var(--text-muted); }
+.overlay-panel .table-scroll { max-height: 50vh; margin: 0; padding: 0; }
 
 /* ------------------------------------------------------------------ tables */
 
