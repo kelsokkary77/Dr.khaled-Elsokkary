@@ -77,6 +77,16 @@ class Settings:
     # Auto-sync on first page load when the cache is empty.
     autosync_on_start: bool = True
 
+    # --- HTTP Basic Auth --- only enabled when both are set. Needed once this
+    # server is reachable from anywhere but localhost (e.g. over Tailscale),
+    # since nothing else here checks who is asking.
+    auth_username: str = ""
+    auth_password: str = ""
+
+    @property
+    def auth_enabled(self) -> bool:
+        return bool(self.auth_username and self.auth_password)
+
     @property
     def cpapi_is_loopback(self) -> bool:
         return any(
@@ -118,4 +128,6 @@ def load_settings(env_file: Path | None = None) -> Settings:
         db_path=db_path,
         base_currency=os.environ.get("IBKR_BASE_CURRENCY", "USD").upper(),
         autosync_on_start=_env_bool("IBKR_AUTOSYNC_ON_START", True),
+        auth_username=os.environ.get("IBKR_AUTH_USERNAME", "").strip(),
+        auth_password=os.environ.get("IBKR_AUTH_PASSWORD", "").strip(),
     )

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from .config import REPO_ROOT, load_settings
 from .providers import ProviderError, describe_providers
@@ -27,6 +32,40 @@ app = FastAPI(
         "Data sources: built-in demo, Flex Web Service, or the Client Portal Gateway."
     ),
 )
+
+
+class BasicAuthMiddleware(BaseHTTPMiddleware):
+    """Gates every request behind IBKR_AUTH_USERNAME / IBKR_AUTH_PASSWORD.
+
+    A no-op when either is unset -- this server has no login screen of its
+    own, so once it is reachable from anywhere but the machine it runs on
+    (a Tailscale tunnel, a shared Wi-Fi network), this is what stands
+    between whoever finds the URL and the account behind it.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if not settings.auth_enabled:
+            return await call_next(request)
+
+        header = request.headers.get("authorization", "")
+        if header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(header[6:]).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError):
+                decoded = ""
+            user, _, password = decoded.partition(":")
+            if hmac.compare_digest(user, settings.auth_username) and hmac.compare_digest(
+                password, settings.auth_password
+            ):
+                return await call_next(request)
+
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="IBKR Dashboard"'},
+        )
+
+
+app.add_middleware(BasicAuthMiddleware)
 
 
 def _fail(exc: ProviderError, status_code: int = 502) -> JSONResponse:
