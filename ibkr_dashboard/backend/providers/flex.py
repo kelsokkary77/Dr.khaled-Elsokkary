@@ -76,10 +76,11 @@ class FlexProvider(BaseProvider):
             )
 
         snapshot = PortfolioSnapshot(provider=self.name)
+        account_ids: list[str] = []
         with httpx.Client(timeout=60, headers=_HEADERS, follow_redirects=True) as client:
             for query_id in self.settings.flex_query_ids:
                 xml_text = self._run_query(client, query_id)
-                self._merge(snapshot, xml_text, query_id)
+                self._merge(snapshot, xml_text, query_id, account_ids)
 
         if not snapshot.positions and not snapshot.nav_history:
             snapshot.warnings.append(
@@ -147,16 +148,23 @@ class FlexProvider(BaseProvider):
 
     # ------------------------------------------------------------------ parsing
 
-    def _merge(self, snapshot: PortfolioSnapshot, xml_text: str, query_id: str) -> None:
+    def _merge(
+        self,
+        snapshot: PortfolioSnapshot,
+        xml_text: str,
+        query_id: str,
+        account_ids: list[str],
+    ) -> None:
         root = _parse(xml_text)
         statements = root.findall(".//FlexStatement") or [root]
 
         for statement in statements:
             info = statement.find(".//AccountInformation")
+            account_id = ""
             if info is not None:
-                snapshot.summary.account_id = (
-                    _attr(info, "accountId") or snapshot.summary.account_id
-                )
+                account_id = _attr(info, "accountId")
+                if account_id:
+                    account_ids.append(account_id)
                 snapshot.summary.account_alias = (
                     _attr(info, "acctAlias", "alias") or snapshot.summary.account_alias
                 )
@@ -167,19 +175,31 @@ class FlexProvider(BaseProvider):
                     _attr(info, "currency") or snapshot.summary.base_currency
                 )
 
-            snapshot.positions.extend(_parse_positions(statement))
-            snapshot.cash.extend(_parse_cash(statement))
-            snapshot.trades.extend(_parse_trades(statement))
-            snapshot.nav_history.extend(_parse_nav(statement))
+            snapshot.positions.extend(_parse_positions(statement, account_id))
+            snapshot.cash.extend(_parse_cash(statement, account_id))
+            snapshot.trades.extend(_parse_trades(statement, account_id))
+            snapshot.nav_history.extend(_parse_nav(statement, account_id))
 
         _dedupe(snapshot)
+
+        # Several linked accounts combined into one snapshot -- name them all
+        # rather than showing only the last one seen. De-duped here (not with
+        # a set) so the order, and so the combined id, stays stable across
+        # syncs -- that id is also the NAV history key.
+        if account_ids:
+            seen: list[str] = []
+            for account_id in account_ids:
+                if account_id not in seen:
+                    seen.append(account_id)
+            snapshot.summary.account_id = " + ".join(seen)
+
         if not statements or statements == [root]:
             snapshot.warnings.append(
                 f"Flex query {query_id} returned no <FlexStatement> element."
             )
 
 
-def _parse_positions(statement: ET.Element) -> list[Position]:
+def _parse_positions(statement: ET.Element, account_id: str = "") -> list[Position]:
     out: list[Position] = []
     for node in statement.findall(".//OpenPosition"):
         quantity = _num(node, "position", "quantity")
@@ -207,12 +227,13 @@ def _parse_positions(statement: ET.Element) -> list[Position]:
                 cost_basis=_num(node, "costBasisMoney"),
                 unrealized_pnl=_num(node, "fifoPnlUnrealized", "unrealizedPnl"),
                 fx_rate_to_base=_num(node, "fxRateToBase") or 1.0,
+                account_id=account_id,
             )
         )
     return out
 
 
-def _parse_cash(statement: ET.Element) -> list[CashBalance]:
+def _parse_cash(statement: ET.Element, account_id: str = "") -> list[CashBalance]:
     out: list[CashBalance] = []
     for node in statement.findall(".//CashReportCurrency"):
         currency = _attr(node, "currency")
@@ -228,12 +249,13 @@ def _parse_cash(statement: ET.Element) -> list[CashBalance]:
                 currency=currency,
                 amount=amount,
                 amount_base=_num(node, "endingCashInBase") or amount,
+                account_id=account_id,
             )
         )
     return out
 
 
-def _parse_trades(statement: ET.Element) -> list[Trade]:
+def _parse_trades(statement: ET.Element, account_id: str = "") -> list[Trade]:
     out: list[Trade] = []
     for node in statement.findall(".//Trade"):
         symbol = _attr(node, "symbol")
@@ -251,13 +273,14 @@ def _parse_trades(statement: ET.Element) -> list[Trade]:
                 realized_pnl=_num(node, "fifoPnlRealized", "realizedPnl"),
                 currency=_attr(node, "currency") or "USD",
                 asset_class=_attr(node, "assetCategory") or "STK",
+                account_id=account_id,
             )
         )
     out.sort(key=lambda t: t.trade_date, reverse=True)
     return out
 
 
-def _parse_nav(statement: ET.Element) -> list[NavPoint]:
+def _parse_nav(statement: ET.Element, account_id: str = "") -> list[NavPoint]:
     out: list[NavPoint] = []
     for node in statement.findall(".//EquitySummaryByReportDateInBase"):
         total = _num(node, "total")
@@ -269,6 +292,7 @@ def _parse_nav(statement: ET.Element) -> list[NavPoint]:
                 nav=total,
                 cash=_num(node, "cash", "cashLong"),
                 securities=_num(node, "stock", "stockLong"),
+                account_id=account_id,
             )
         )
     out.sort(key=lambda p: p.as_of)
@@ -276,21 +300,76 @@ def _parse_nav(statement: ET.Element) -> list[NavPoint]:
 
 
 def _dedupe(snapshot: PortfolioSnapshot) -> None:
-    """Multiple Flex queries can overlap; keep one row per natural key."""
-    seen_pos: dict[tuple[str, str], Position] = {}
+    """Two different problems share the name "duplicate" here, and need
+    opposite fixes:
+
+    1. Within one account, overlapping Flex queries can report the same
+       position/cash/NAV/trade more than once -- keep one copy.
+    2. Across different (linked) accounts, the same holding is real and
+       distinct in each -- combine the totals rather than keeping one
+       account's figure and silently discarding the other's.
+
+    Positions, cash and NAV are summed across accounts (that is what a
+    combined dashboard means); trades never are, since two accounts each
+    buying the same symbol on the same day at the same price are two real
+    trades, not one duplicated row. For a single account, account_id is the
+    same on every row, so stage 1 alone determines the result and behavior
+    is unchanged from before this file supported more than one account.
+    """
+    # Positions: one row per account+holding, then sum matching holdings
+    # across accounts.
+    per_account_pos: dict[tuple[str, str, str], Position] = {}
     for pos in snapshot.positions:
-        seen_pos[(pos.conid or pos.symbol, pos.currency)] = pos
-    snapshot.positions = list(seen_pos.values())
+        per_account_pos[(pos.account_id, pos.conid or pos.symbol, pos.currency)] = pos
+    combined_pos: dict[tuple[str, str], Position] = {}
+    for pos in per_account_pos.values():
+        key = (pos.conid or pos.symbol, pos.currency)
+        if key in combined_pos:
+            existing = combined_pos[key]
+            existing.quantity += pos.quantity
+            existing.market_value += pos.market_value
+            existing.cost_basis += pos.cost_basis
+            existing.unrealized_pnl += pos.unrealized_pnl
+        else:
+            combined_pos[key] = pos
+    snapshot.positions = list(combined_pos.values())
 
-    seen_cash: dict[str, CashBalance] = {c.currency: c for c in snapshot.cash}
-    snapshot.cash = list(seen_cash.values())
+    # Cash: one row per account+currency, then sum matching currencies
+    # across accounts.
+    per_account_cash: dict[tuple[str, str], CashBalance] = {}
+    for c in snapshot.cash:
+        per_account_cash[(c.account_id, c.currency)] = c
+    combined_cash: dict[str, CashBalance] = {}
+    for c in per_account_cash.values():
+        if c.currency in combined_cash:
+            existing = combined_cash[c.currency]
+            existing.amount += c.amount
+            existing.amount_base += c.amount_base
+        else:
+            combined_cash[c.currency] = c
+    snapshot.cash = list(combined_cash.values())
 
-    seen_nav: dict[str, NavPoint] = {n.as_of: n for n in snapshot.nav_history}
-    snapshot.nav_history = sorted(seen_nav.values(), key=lambda n: n.as_of)
+    # NAV: one row per account+date, then sum matching dates across
+    # accounts -- combined net liquidation on each day.
+    per_account_nav: dict[tuple[str, str], NavPoint] = {}
+    for n in snapshot.nav_history:
+        per_account_nav[(n.account_id, n.as_of)] = n
+    combined_nav: dict[str, NavPoint] = {}
+    for n in per_account_nav.values():
+        if n.as_of in combined_nav:
+            existing = combined_nav[n.as_of]
+            existing.nav += n.nav
+            existing.cash += n.cash
+            existing.securities += n.securities
+        else:
+            combined_nav[n.as_of] = n
+    snapshot.nav_history = sorted(combined_nav.values(), key=lambda n: n.as_of)
 
-    seen_trade: dict[tuple, Trade] = {
-        (t.trade_date, t.symbol, t.quantity, t.price): t for t in snapshot.trades
-    }
+    # Trades: drop same-account duplicates only -- never merge two accounts'
+    # trades into one.
+    seen_trade: dict[tuple, Trade] = {}
+    for t in snapshot.trades:
+        seen_trade[(t.account_id, t.trade_date, t.symbol, t.quantity, t.price)] = t
     snapshot.trades = sorted(
         seen_trade.values(), key=lambda t: t.trade_date, reverse=True
     )

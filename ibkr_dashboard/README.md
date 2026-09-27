@@ -222,6 +222,33 @@ IBKR_FLEX_QUERY_IDS=1234567
 Restart, then press **Sync now**. You can list several query IDs separated by
 commas; overlapping rows are de-duplicated.
 
+### Combining a second linked account
+
+If you have more than one account under the same IBKR login (a joint or
+family-linked account, for example), you can show both as one combined
+dashboard — total net worth, holdings, cash and NAV history added together.
+
+1. Create a **second** Activity Flex Query the same way as above. When IBKR
+   asks which account it's for, pick the other one this time.
+2. You don't need a new token — one Flex Web Service token covers every
+   account under your login.
+3. Add its Query ID to the list:
+
+   ```ini
+   IBKR_FLEX_QUERY_IDS=1234567,7654321
+   ```
+
+The dashboard then shows the combined totals: the same stock held in both
+accounts is added into one row (not two, and never silently dropped), cash
+balances are summed per currency, and NAV history is summed per day. Trades
+from each account are always kept separate, even if both accounts happened
+to buy the same thing on the same day.
+
+If instead you want to see each account **on its own**, without combining
+them, run a second, separate copy of this dashboard (a second folder, its
+own `.env` with just that account's query ID, and a different `IBKR_PORT`)
+rather than listing both query IDs here.
+
 ---
 
 ## Option B — Client Portal Web API (live)
@@ -372,7 +399,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-103 tests, none of which touch the network: Flex parsing runs against
+108 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, and the API tests run the demo provider through
 FastAPI's `TestClient`.
 

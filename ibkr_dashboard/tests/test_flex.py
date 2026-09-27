@@ -54,7 +54,7 @@ GENERATING = """<FlexStatementResponse timestamp="17 September, 2026">
 @pytest.fixture
 def parsed() -> PortfolioSnapshot:
     snapshot = PortfolioSnapshot(provider="flex")
-    flex.FlexProvider(Settings())._merge(snapshot, STATEMENT, "999")
+    flex.FlexProvider(Settings())._merge(snapshot, STATEMENT, "999", [])
     flex._finalize_summary(snapshot, "USD")
     return snapshot
 
@@ -107,14 +107,98 @@ def test_trades_are_newest_first_with_normalized_dates(parsed):
 
 
 def test_merging_the_same_statement_twice_does_not_duplicate():
+    """Same account, overlapping query windows -- keep one copy, not two."""
     snapshot = PortfolioSnapshot(provider="flex")
     provider = flex.FlexProvider(Settings())
-    provider._merge(snapshot, STATEMENT, "999")
-    provider._merge(snapshot, STATEMENT, "999")
+    account_ids: list[str] = []
+    provider._merge(snapshot, STATEMENT, "999", account_ids)
+    provider._merge(snapshot, STATEMENT, "999", account_ids)
     assert len(snapshot.positions) == 2
     assert len(snapshot.cash) == 2
     assert len(snapshot.nav_history) == 2
     assert len(snapshot.trades) == 2
+
+
+# ------------------------------------------------------- combined accounts
+
+SECOND_ACCOUNT_STATEMENT = """<FlexQueryResponse queryName="Dash2" type="AF">
+ <FlexStatements count="1">
+  <FlexStatement accountId="U7654321" fromDate="2026-01-01" toDate="2026-09-16">
+   <AccountInformation accountId="U7654321" acctAlias="Linked" currency="USD"
+                       accountType="INDIVIDUAL"/>
+   <EquitySummaryInBase>
+     <EquitySummaryByReportDateInBase reportDate="2026-09-15" cash="500" stock="4500" total="5000"/>
+     <EquitySummaryByReportDateInBase reportDate="2026-09-16" cash="500" stock="4700" total="5200"/>
+   </EquitySummaryInBase>
+   <CashReport>
+     <CashReportCurrency currency="BASE_SUMMARY" endingCash="500"/>
+     <CashReportCurrency currency="USD" endingCash="500" endingCashInBase="500"/>
+   </CashReport>
+   <OpenPositions>
+     <OpenPosition currency="USD" fxRateToBase="1" assetCategory="STK" symbol="AAPL"
+       description="APPLE INC" conid="265598" listingExchange="NASDAQ" position="10"
+       markPrice="250" positionValue="2500" costBasisPrice="200" costBasisMoney="2000"
+       fifoPnlUnrealized="500" multiplier="1" subCategory="COMMON" issuerCountryCode="US"/>
+   </OpenPositions>
+   <Trades>
+     <Trade symbol="AAPL" tradeDate="20260910" buySell="BUY" quantity="10" tradePrice="240"
+            proceeds="-2400" ibCommission="-1.0" fifoPnlRealized="0" currency="USD"
+            assetCategory="STK"/>
+   </Trades>
+  </FlexStatement>
+ </FlexStatements>
+</FlexQueryResponse>"""
+
+
+@pytest.fixture
+def combined() -> PortfolioSnapshot:
+    """Two linked accounts, each its own query, merged into one snapshot --
+    the setup a second IBKR_FLEX_QUERY_IDS entry produces."""
+    snapshot = PortfolioSnapshot(provider="flex")
+    provider = flex.FlexProvider(Settings())
+    account_ids: list[str] = []
+    provider._merge(snapshot, STATEMENT, "999", account_ids)
+    provider._merge(snapshot, SECOND_ACCOUNT_STATEMENT, "998", account_ids)
+    flex._finalize_summary(snapshot, "USD")
+    return snapshot
+
+
+def test_combined_account_id_names_both_accounts(combined):
+    assert combined.summary.account_id == "U1234567 + U7654321"
+
+
+def test_same_holding_in_both_accounts_is_summed_not_dropped(combined):
+    """Account 1 holds 30 AAPL, account 2 holds 10 -- the combined dashboard
+    must show 40, not silently drop one account's shares."""
+    aapl = next(p for p in combined.positions if p.symbol == "AAPL")
+    assert aapl.quantity == pytest.approx(40.0)
+    assert aapl.market_value == pytest.approx(7500.0 + 2500.0)
+    assert aapl.cost_basis == pytest.approx(5400.0 + 2000.0)
+    assert aapl.unrealized_pnl == pytest.approx(2100.0 + 500.0)
+
+
+def test_cash_in_the_same_currency_is_summed_across_accounts(combined):
+    usd = next(c for c in combined.cash if c.currency == "USD")
+    assert usd.amount_base == pytest.approx(1000.0 + 500.0)
+
+
+def test_nav_on_the_same_date_is_summed_across_accounts(combined):
+    """Combined net liquidation on a date is both accounts' NAV added
+    together, not one account's figure standing in for both."""
+    by_date = {n.as_of: n.nav for n in combined.nav_history}
+    assert by_date["2026-09-15"] == pytest.approx(10_000.0 + 5_000.0)
+    assert by_date["2026-09-16"] == pytest.approx(10_500.0 + 5_200.0)
+    assert combined.summary.net_liquidation == pytest.approx(10_500.0 + 5_200.0)
+
+
+def test_identical_trades_in_different_accounts_are_both_kept(combined):
+    """Both accounts bought 10 AAPL @ 240 on the same day -- two real trades,
+    not one row deduplicated away."""
+    matching = [
+        t for t in combined.trades
+        if t.symbol == "AAPL" and t.trade_date == "2026-09-10" and t.price == 240
+    ]
+    assert len(matching) == 2
 
 
 def test_failure_response_is_described_for_a_human():
