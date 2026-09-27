@@ -64,6 +64,11 @@ class Position:
     unrealized_pnl: float = 0.0
     realized_pnl: float = 0.0
     fx_rate_to_base: float = 1.0
+    # Which account this came from -- blank for a single-account sync; set
+    # when a provider combines more than one linked account into one
+    # snapshot, so rows from different accounts are never confused for
+    # duplicates of the same holding.
+    account_id: str = ""
 
     def __post_init__(self) -> None:
         self.quantity = _f(self.quantity)
@@ -113,6 +118,7 @@ class CashBalance:
     currency: str
     amount: float = 0.0
     amount_base: float = 0.0
+    account_id: str = ""
 
     def __post_init__(self) -> None:
         self.currency = _s(self.currency, "USD").upper()
@@ -135,6 +141,7 @@ class Trade:
     realized_pnl: float = 0.0
     currency: str = "USD"
     asset_class: str = "STK"
+    account_id: str = ""
 
     def __post_init__(self) -> None:
         self.quantity = _f(self.quantity)
@@ -158,6 +165,7 @@ class NavPoint:
     nav: float = 0.0
     cash: float = 0.0
     securities: float = 0.0
+    account_id: str = ""
 
     def __post_init__(self) -> None:
         self.as_of = normalize_date(self.as_of)

@@ -222,6 +222,40 @@ IBKR_FLEX_QUERY_IDS=1234567
 Restart, then press **Sync now**. You can list several query IDs separated by
 commas; overlapping rows are de-duplicated.
 
+### Combining a second linked account
+
+If you have more than one account under the same IBKR login (a joint or
+family-linked account, for example), you can show both as one combined
+dashboard — total net worth, holdings, cash and NAV history added together.
+
+**Easiest: one query scoped to both accounts.** When creating the Activity
+Flex Query, IBKR lets you include more than one linked account in the same
+query — do that, and a single Query ID in `IBKR_FLEX_QUERY_IDS` is all you
+need. Nothing else changes.
+
+**Or: two separate queries, one per account.** If your account structure
+only lets you scope a query to one account at a time, create a second
+Activity Flex Query the same way as above (picking the other account when
+IBKR asks), then list both Query IDs:
+
+```ini
+IBKR_FLEX_QUERY_IDS=1234567,7654321
+```
+
+You don't need a second token either way — one Flex Web Service token
+covers every account under your login.
+
+Either setup produces the same result: the same stock held in both accounts
+is added into one row (not two, and never silently dropped), cash balances
+are summed per currency, and NAV history is summed per day. Trades from each
+account are always kept separate, even if both accounts happened to buy the
+same thing on the same day.
+
+If instead you want to see each account **on its own**, without combining
+them, run a second, separate copy of this dashboard (a second folder, its
+own `.env` with just that account's query ID, and a different `IBKR_PORT`)
+rather than listing both query IDs here.
+
 ---
 
 ## Option B — Client Portal Web API (live)
@@ -372,7 +406,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-103 tests, none of which touch the network: Flex parsing runs against
+109 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, and the API tests run the demo provider through
 FastAPI's `TestClient`.
 
