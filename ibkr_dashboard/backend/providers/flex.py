@@ -37,6 +37,7 @@ from ..models import (
     Trade,
 )
 from .base import BaseProvider, ProviderError
+from ..sector_map import lookup_sector
 
 SECTIONS_NEEDED = (
     "Account Information",
@@ -184,14 +185,18 @@ def _parse_positions(statement: ET.Element) -> list[Position]:
         quantity = _num(node, "position", "quantity")
         if not quantity:
             continue
+        symbol = _attr(node, "symbol")
         out.append(
             Position(
-                symbol=_attr(node, "symbol"),
+                symbol=symbol,
                 description=_attr(node, "description"),
                 asset_class=_attr(node, "assetCategory") or "STK",
                 currency=_attr(node, "currency") or "USD",
                 exchange=_attr(node, "listingExchange", "exchange"),
-                sector=_attr(node, "subCategory") or "Unclassified",
+                # Flex has no real sector field at all -- this is the
+                # built-in lookup table, not data IBKR supplied.
+                sector=lookup_sector(symbol),
+                security_type=_attr(node, "subCategory") or "Unclassified",
                 country=_attr(node, "issuerCountryCode", "countryCode"),
                 conid=_attr(node, "conid"),
                 quantity=quantity,

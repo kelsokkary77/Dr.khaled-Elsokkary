@@ -69,6 +69,19 @@ def test_zero_quantity_positions_are_dropped(parsed):
     assert [p.symbol for p in parsed.positions] == ["AAPL", "ASML"]
 
 
+def test_sector_comes_from_the_lookup_table_not_subcategory(parsed):
+    """Flex has no real sector field -- subCategory ("COMMON") is asset type,
+    not a sector, and must not leak into Position.sector."""
+    aapl = next(p for p in parsed.positions if p.symbol == "AAPL")
+    assert aapl.sector == "Technology"
+    assert aapl.security_type == "COMMON"
+
+
+def test_missing_subcategory_falls_back_to_unclassified(parsed):
+    asml = next(p for p in parsed.positions if p.symbol == "ASML")
+    assert asml.security_type == "Unclassified"  # no subCategory in the fixture
+
+
 def test_non_base_position_is_converted_to_base_currency(parsed):
     asml = next(p for p in parsed.positions if p.symbol == "ASML")
     assert asml.market_value == pytest.approx(2 * 700 * 1.08)

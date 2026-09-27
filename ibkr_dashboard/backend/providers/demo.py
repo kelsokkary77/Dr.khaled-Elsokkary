@@ -20,22 +20,25 @@ from ..models import (
     Position,
     Trade,
 )
+from ..sector_map import lookup_sector
 from .base import BaseProvider
 
-# symbol, description, asset class, currency, sector, country, qty, mark, cost
+_SECURITY_TYPE = {"STK": "Common Stock", "ETF": "ETF"}
+
+# symbol, description, asset class, currency, country, qty, mark, cost
 _HOLDINGS = [
-    ("AAPL", "APPLE INC", "STK", "USD", "Technology", "US", 180, 246.30, 171.42),
-    ("MSFT", "MICROSOFT CORP", "STK", "USD", "Technology", "US", 95, 512.75, 388.10),
-    ("NVDA", "NVIDIA CORP", "STK", "USD", "Technology", "US", 140, 184.20, 108.65),
-    ("CSPX", "ISHARES CORE S&P 500 UCITS ETF", "ETF", "USD", "Broad Equity", "IE", 210, 648.90, 512.33),
-    ("EIMI", "ISHARES CORE MSCI EM IMI UCITS", "ETF", "USD", "Broad Equity", "IE", 900, 38.44, 33.10),
-    ("IWDA", "ISHARES CORE MSCI WORLD UCITS", "ETF", "USD", "Broad Equity", "IE", 320, 112.68, 92.75),
-    ("UNH", "UNITEDHEALTH GROUP INC", "STK", "USD", "Healthcare", "US", 60, 336.10, 402.88),
-    ("LLY", "ELI LILLY & CO", "STK", "USD", "Healthcare", "US", 35, 812.40, 645.20),
-    ("ASML", "ASML HOLDING NV", "STK", "EUR", "Technology", "NL", 25, 742.60, 610.15),
-    ("BRK B", "BERKSHIRE HATHAWAY INC-CL B", "STK", "USD", "Financials", "US", 70, 498.25, 412.90),
-    ("XOM", "EXXON MOBIL CORP", "STK", "USD", "Energy", "US", 150, 119.85, 104.30),
-    ("GLD", "SPDR GOLD SHARES", "ETF", "USD", "Commodities", "US", 80, 331.70, 248.55),
+    ("AAPL", "APPLE INC", "STK", "USD", "US", 180, 246.30, 171.42),
+    ("MSFT", "MICROSOFT CORP", "STK", "USD", "US", 95, 512.75, 388.10),
+    ("NVDA", "NVIDIA CORP", "STK", "USD", "US", 140, 184.20, 108.65),
+    ("CSPX", "ISHARES CORE S&P 500 UCITS ETF", "ETF", "USD", "IE", 210, 648.90, 512.33),
+    ("EIMI", "ISHARES CORE MSCI EM IMI UCITS", "ETF", "USD", "IE", 900, 38.44, 33.10),
+    ("IWDA", "ISHARES CORE MSCI WORLD UCITS", "ETF", "USD", "IE", 320, 112.68, 92.75),
+    ("UNH", "UNITEDHEALTH GROUP INC", "STK", "USD", "US", 60, 336.10, 402.88),
+    ("LLY", "ELI LILLY & CO", "STK", "USD", "US", 35, 812.40, 645.20),
+    ("ASML", "ASML HOLDING NV", "STK", "EUR", "NL", 25, 742.60, 610.15),
+    ("BRK B", "BERKSHIRE HATHAWAY INC-CL B", "STK", "USD", "US", 70, 498.25, 412.90),
+    ("XOM", "EXXON MOBIL CORP", "STK", "USD", "US", 150, 119.85, 104.30),
+    ("GLD", "SPDR GOLD SHARES", "ETF", "USD", "US", 80, 331.70, 248.55),
 ]
 
 _FX_TO_USD = {"USD": 1.0, "EUR": 1.0842, "GBP": 1.2710, "SAR": 0.2666}
@@ -54,7 +57,8 @@ class DemoProvider(BaseProvider):
                 description=desc,
                 asset_class=asset_class,
                 currency=ccy,
-                sector=sector,
+                sector=lookup_sector(sym),
+                security_type=_SECURITY_TYPE.get(asset_class, "Unclassified"),
                 country=country,
                 exchange="NASDAQ" if ccy == "USD" else "AEB",
                 conid=f"{abs(hash(sym)) % 900000 + 100000}",
@@ -63,7 +67,7 @@ class DemoProvider(BaseProvider):
                 cost_basis_price=cost,
                 fx_rate_to_base=_FX_TO_USD.get(ccy, 1.0),
             )
-            for sym, desc, asset_class, ccy, sector, country, qty, mark, cost in _HOLDINGS
+            for sym, desc, asset_class, ccy, country, qty, mark, cost in _HOLDINGS
         ]
 
         cash = [

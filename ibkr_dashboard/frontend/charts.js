@@ -397,6 +397,9 @@ export function barsH(container, options) {
     // color carries identity here, so a legend is not optional (see rules).
     legend,
     secondary = (row) => `${fmt.pct(row.weight_pct ?? 0, 1)} of book`,
+    // Optional: called with the row when a bar is clicked -- e.g. drilling
+    // from a group (a sector, a currency) down to the holdings inside it.
+    onRowClick,
   } = options;
 
   if (!rows.length) {
@@ -474,6 +477,10 @@ export function barsH(container, options) {
         group.querySelector("path").removeAttribute("fill-opacity");
         tooltip.hide();
       });
+      if (onRowClick) {
+        hit.style.cursor = "pointer";
+        hit.addEventListener("click", () => onRowClick(row));
+      }
       group.appendChild(hit);
       svg.appendChild(group);
     });
@@ -662,7 +669,15 @@ function arcPath(cx, cy, rOuter, rInner, startAngle, endAngle) {
  * "Other" is a bucket, not a competitor for top billing.
  */
 export function donutChart(container, options) {
-  const { rows = [], height = 240, currency = "USD", ariaLabel = "Distribution" } = options;
+  const {
+    rows = [],
+    height = 240,
+    currency = "USD",
+    ariaLabel = "Distribution",
+    // Optional: called with the row (ring slice or legend entry) when
+    // clicked -- e.g. drilling from a sector down to the holdings in it.
+    onSliceClick,
+  } = options;
 
   if (!rows.length) {
     emptyState(container, "Nothing to show.");
@@ -710,6 +725,10 @@ export function donutChart(container, options) {
         path.removeAttribute("fill-opacity");
         tooltip.hide();
       });
+      if (onSliceClick) {
+        path.style.cursor = "pointer";
+        path.addEventListener("click", () => onSliceClick(row));
+      }
       svg.appendChild(path);
     });
 
@@ -725,7 +744,7 @@ export function donutChart(container, options) {
 
     const legendHtml = rows
       .map(
-        (row) => `<span class="item">
+        (row, i) => `<span class="item${onSliceClick ? " clickable" : ""}" data-idx="${i}">
           <span class="swatch" style="background:${token(row.color)}"></span>
           ${row.label} &middot; ${fmt.pct((Math.max(0, Number(row.value) || 0) / total) * 100, 1)}
         </span>`,
@@ -737,6 +756,12 @@ export function donutChart(container, options) {
     wrap.innerHTML = '<div class="donut-ring"></div><div class="legend donut-legend"></div>';
     wrap.querySelector(".donut-ring").appendChild(svg);
     wrap.querySelector(".donut-legend").innerHTML = legendHtml;
+
+    if (onSliceClick) {
+      wrap.querySelectorAll(".donut-legend .item").forEach((node) => {
+        node.addEventListener("click", () => onSliceClick(rows[Number(node.dataset.idx)]));
+      });
+    }
 
     container.querySelector(".donut-wrap")?.remove();
     container.insertBefore(wrap, container.firstChild);

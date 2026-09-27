@@ -114,6 +114,7 @@ def allocation(snapshot: PortfolioSnapshot) -> dict[str, list[dict[str, Any]]]:
     return {
         "by_asset_class": by_asset_class,
         "by_sector": _bucket(positions, key=lambda p: p.sector),
+        "by_security_type": _bucket(positions, key=lambda p: p.security_type),
         "by_currency": currency_rows,
         "by_country": _bucket(positions, key=lambda p: p.country or "Unknown"),
     }

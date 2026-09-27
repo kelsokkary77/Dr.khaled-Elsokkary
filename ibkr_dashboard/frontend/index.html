@@ -64,6 +64,7 @@
       <div class="filters" role="group" aria-label="Group allocation by" style="margin-bottom:14px">
         <button data-dim="by_asset_class" aria-pressed="true">Asset class</button>
         <button data-dim="by_sector" aria-pressed="false">Sector</button>
+        <button data-dim="by_security_type" aria-pressed="false">Security type</button>
         <button data-dim="by_currency" aria-pressed="false">Currency</button>
         <button data-dim="by_country" aria-pressed="false">Country</button>
       </div>
@@ -160,6 +161,17 @@
   </div>
 
   <footer class="foot" id="foot"></footer>
+</div>
+
+<div class="overlay" id="drilldown-overlay" hidden>
+  <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="drilldown-title">
+    <header>
+      <h3 id="drilldown-title"></h3>
+      <button class="close" id="drilldown-close" aria-label="Close">&times;</button>
+    </header>
+    <p class="sub" id="drilldown-sub"></p>
+    <div class="table-scroll" id="drilldown-table"></div>
+  </div>
 </div>
 
 <script type="module" src="/static/app.js"></script>

@@ -17,10 +17,13 @@ def make_snapshot() -> PortfolioSnapshot:
         summary=AccountSummary(account_id="U1", base_currency="USD"),
         positions=[
             Position(symbol="A", asset_class="STK", currency="USD", sector="Tech",
+                     security_type="Common Stock",
                      country="US", quantity=10, mark_price=60.0, cost_basis_price=40.0),
             Position(symbol="B", asset_class="ETF", currency="USD", sector="Broad",
+                     security_type="ETF",
                      country="IE", quantity=10, mark_price=30.0, cost_basis_price=35.0),
             Position(symbol="C", asset_class="STK", currency="EUR", sector="Tech",
+                     security_type="Common Stock",
                      country="NL", quantity=10, mark_price=10.0, cost_basis_price=8.0),
         ],
         cash=[CashBalance(currency="USD", amount=100.0, amount_base=100.0)],
@@ -54,6 +57,14 @@ def test_cash_appears_as_its_own_asset_class_slice():
 def test_asset_class_codes_get_readable_labels():
     rows = analytics.allocation(make_snapshot())["by_asset_class"]
     assert {"Stocks", "ETFs", "Cash"} <= {r["label"] for r in rows}
+
+
+def test_security_type_is_a_separate_dimension_from_sector():
+    """Sector (Technology, Healthcare) and security type (Common Stock, ETF)
+    are two different classifications -- they must not collapse into one."""
+    rows = analytics.allocation(make_snapshot())["by_security_type"]
+    labels = {r["key"] for r in rows}
+    assert labels == {"Common Stock", "ETF"}
 
 
 def test_currency_allocation_merges_positions_and_cash():

@@ -27,6 +27,17 @@ def test_position_row_is_normalized():
     assert p.sector == "Technology"
 
 
+def test_live_sector_is_used_as_is_when_present():
+    """IBKR's own sector/group is real data -- never override it."""
+    assert _position_from_row(POSITION_ROW).sector == "Technology"
+
+
+def test_missing_live_sector_falls_back_to_the_lookup_table():
+    row = {**POSITION_ROW, "ticker": "XOM"}
+    del row["sector"]
+    assert _position_from_row(row).sector == "Energy"
+
+
 def test_avg_cost_is_divided_by_the_multiplier():
     """IBKR reports avgCost per contract, but cost_basis_price is per unit."""
     row = {**POSITION_ROW, "multiplier": 100, "avgCost": 18_000.0}

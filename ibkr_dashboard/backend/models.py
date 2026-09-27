@@ -47,7 +47,12 @@ class Position:
     asset_class: str = "STK"
     currency: str = "USD"
     exchange: str = ""
+    # The security's real sector (Technology, Healthcare, ...) -- see
+    # backend/sector_map.py for where this comes from per provider.
     sector: str = "Unclassified"
+    # What kind of security it is (Common Stock, ETF, ADR, ...) -- distinct
+    # from sector; this is what IBKR's Flex export actually provides.
+    security_type: str = "Unclassified"
     country: str = ""
     conid: str = ""
     quantity: float = 0.0
@@ -89,6 +94,7 @@ class Position:
         self.asset_class = _s(self.asset_class, "STK").upper()
         self.currency = _s(self.currency, "USD").upper()
         self.sector = _s(self.sector, "Unclassified")
+        self.security_type = _s(self.security_type, "Unclassified")
 
     @property
     def unrealized_pnl_pct(self) -> float:
