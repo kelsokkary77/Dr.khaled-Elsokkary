@@ -263,6 +263,59 @@ def test_one_query_covering_both_accounts_merges_correctly():
     assert snapshot.summary.net_liquidation == pytest.approx(15_700.0)
 
 
+# Some multi-account Flex reports don't split into one <FlexStatement> per
+# account -- they put every row in a single statement and tag each row with
+# its own accountId instead. If that per-row id is ignored, every row falls
+# back to the statement's one AccountInformation id, and an overlapping
+# holding (same symbol in both accounts) looks like a same-account duplicate
+# during dedup and gets dropped rather than summed.
+MIXED_ACCOUNT_ROWS_STATEMENT = """<FlexQueryResponse queryName="Mixed" type="AF">
+ <FlexStatements count="1">
+  <FlexStatement accountId="U1234567" fromDate="2026-01-01" toDate="2026-09-16">
+   <AccountInformation accountId="U1234567" acctAlias="Main" currency="USD"
+                       accountType="INDIVIDUAL"/>
+   <EquitySummaryInBase>
+     <EquitySummaryByReportDateInBase reportDate="2026-09-16" cash="1500" stock="14200" total="15700"/>
+   </EquitySummaryInBase>
+   <CashReport>
+     <CashReportCurrency currency="BASE_SUMMARY" endingCash="1500"/>
+     <CashReportCurrency accountId="U1234567" currency="USD" endingCash="1000" endingCashInBase="1000"/>
+     <CashReportCurrency accountId="U7654321" currency="USD" endingCash="500" endingCashInBase="500"/>
+   </CashReport>
+   <OpenPositions>
+     <OpenPosition accountId="U1234567" currency="USD" fxRateToBase="1" assetCategory="STK" symbol="AAPL"
+       description="APPLE INC" conid="265598" listingExchange="NASDAQ" position="30"
+       markPrice="250" positionValue="7500" costBasisPrice="180" costBasisMoney="5400"
+       fifoPnlUnrealized="2100" multiplier="1" subCategory="COMMON" issuerCountryCode="US"/>
+     <OpenPosition accountId="U7654321" currency="USD" fxRateToBase="1" assetCategory="STK" symbol="AAPL"
+       description="APPLE INC" conid="265598" listingExchange="NASDAQ" position="10"
+       markPrice="250" positionValue="2500" costBasisPrice="200" costBasisMoney="2000"
+       fifoPnlUnrealized="500" multiplier="1" subCategory="COMMON" issuerCountryCode="US"/>
+   </OpenPositions>
+   <Trades/>
+  </FlexStatement>
+ </FlexStatements>
+</FlexQueryResponse>"""
+
+
+def test_rows_tagged_with_their_own_account_id_are_summed_not_dropped():
+    """One statement, two accounts' rows mixed together and each tagged with
+    its own accountId -- the overlapping AAPL holding must still be summed
+    (40 shares, $10,000), not collapsed to just one account's share count."""
+    snapshot = PortfolioSnapshot(provider="flex")
+    provider = flex.FlexProvider(Settings())
+    provider._merge(snapshot, MIXED_ACCOUNT_ROWS_STATEMENT, "999", [])
+    flex._finalize_summary(snapshot, "USD")
+
+    assert snapshot.summary.account_id == "U1234567 + U7654321"
+    aapl = next(p for p in snapshot.positions if p.symbol == "AAPL")
+    assert aapl.quantity == pytest.approx(40.0)
+    assert aapl.market_value == pytest.approx(10_000.0)
+    assert snapshot.summary.securities_gross_value == pytest.approx(10_000.0)
+    usd_cash = next(c for c in snapshot.cash if c.currency == "USD")
+    assert usd_cash.amount_base == pytest.approx(1500.0)
+
+
 def test_failure_response_is_described_for_a_human():
     message = flex._describe_failure(flex._parse(FAILURE), "query 1")
     assert "1012" in message and "Token has expired" in message
