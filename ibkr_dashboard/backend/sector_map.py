@@ -37,7 +37,9 @@ _RAW: dict[str, str] = {
     "STM": "Technology", "NXPI": "Technology", "MRVL": "Technology",
     "APH": "Technology", "KLAC": "Technology", "LRCX": "Technology",
     "ANET": "Technology", "DELL": "Technology", "HPQ": "Technology",
-    "ERIC": "Technology", "NOK": "Technology",
+    "ERIC": "Technology", "NOK": "Technology", "CRWD": "Technology",
+    "DSY": "Technology", "IGDA": "Technology", "NBIS": "Technology",
+    "WDC": "Technology", "ASM": "Technology", "SNDK": "Technology",
 
     # --- Communication Services ---
     "GOOGL": "Communication Services", "GOOG": "Communication Services",
@@ -62,6 +64,7 @@ _RAW: dict[str, str] = {
     "SYK": "Healthcare", "HCA": "Healthcare", "NVO": "Healthcare",
     "AZN": "Healthcare", "GSK": "Healthcare", "SNY": "Healthcare",
     "NVS": "Healthcare", "MRNA": "Healthcare", "IDXX": "Healthcare",
+    "ARGX": "Healthcare",
 
     # --- Financials ---
     "BRKB": "Financials", "JPM": "Financials", "V": "Financials",
@@ -87,7 +90,7 @@ _RAW: dict[str, str] = {
     "ABNB": "Consumer Discretionary", "EBAY": "Consumer Discretionary",
     "ETSY": "Consumer Discretionary", "LVMUY": "Consumer Discretionary",
     "MELI": "Consumer Discretionary", "JD": "Consumer Discretionary",
-    "PDD": "Consumer Discretionary",
+    "PDD": "Consumer Discretionary", "RMS": "Consumer Discretionary",
 
     # --- Consumer Staples ---
     "WMT": "Consumer Staples", "PG": "Consumer Staples", "COST": "Consumer Staples",
@@ -95,7 +98,7 @@ _RAW: dict[str, str] = {
     "MO": "Consumer Staples", "MDLZ": "Consumer Staples", "CL": "Consumer Staples",
     "KMB": "Consumer Staples", "GIS": "Consumer Staples", "STZ": "Consumer Staples",
     "TGT": "Consumer Staples", "KDP": "Consumer Staples", "UL": "Consumer Staples",
-    "NSRGY": "Consumer Staples", "DEO": "Consumer Staples",
+    "NSRGY": "Consumer Staples", "DEO": "Consumer Staples", "OR": "Consumer Staples",
 
     # --- Industrials ---
     "GE": "Industrials", "RTX": "Industrials", "CAT": "Industrials",
@@ -106,7 +109,8 @@ _RAW: dict[str, str] = {
     "FDX": "Industrials", "EMR": "Industrials", "ITW": "Industrials",
     "WM": "Industrials", "PH": "Industrials", "TT": "Industrials",
     "NSC": "Industrials", "PCAR": "Industrials", "ROP": "Industrials",
-    "SIEGY": "Industrials", "AIR": "Industrials",
+    "SIEGY": "Industrials", "AIR": "Industrials", "PWR": "Industrials",
+    "BE": "Industrials", "VRT": "Industrials",
 
     # --- Energy ---
     "XOM": "Energy", "CVX": "Energy", "COP": "Energy", "SLB": "Energy",
@@ -129,7 +133,7 @@ _RAW: dict[str, str] = {
     "LIN": "Materials", "APD": "Materials", "SHW": "Materials", "FCX": "Materials",
     "ECL": "Materials", "NEM": "Materials", "NUE": "Materials", "DOW": "Materials",
     "PPG": "Materials", "VALE": "Materials", "RIO": "Materials", "BHP": "Materials",
-    "GLEN": "Materials", "AA": "Materials",
+    "GLEN": "Materials", "AA": "Materials", "WPM": "Materials",
 
     # --- Broad-market / index funds: no single sector, kept together ---
     "SPY": "Diversified", "VOO": "Diversified", "IVV": "Diversified",
@@ -138,24 +142,25 @@ _RAW: dict[str, str] = {
     "CSPX": "Diversified", "EIMI": "Diversified", "IWDA": "Diversified",
     "VWRA": "Diversified", "VWCE": "Diversified", "ACWI": "Diversified",
     "EFA": "Diversified", "EEM": "Diversified", "SWDA": "Diversified",
-    "AGGH": "Diversified",
+    "AGGH": "Diversified", "MWIM": "Diversified", "ISDE": "Diversified",
+    "SPWI": "Diversified",
 
     # --- Sector ETFs (kept as their sector, not "Diversified") ---
     "XLK": "Technology", "XLF": "Financials", "XLE": "Energy",
     "XLV": "Healthcare", "XLY": "Consumer Discretionary", "XLP": "Consumer Staples",
     "XLI": "Industrials", "XLU": "Utilities", "XLB": "Materials",
     "XLRE": "Real Estate", "XLC": "Communication Services",
-    "SMH": "Technology", "SOXX": "Technology",
+    "SMH": "Technology", "SOXX": "Technology", "SEMI": "Technology",
 
     # --- Commodities ---
     "GLD": "Commodities", "IAU": "Commodities", "SLV": "Commodities",
     "USO": "Commodities", "DBC": "Commodities", "PDBC": "Commodities",
-    "SGOL": "Commodities",
+    "SGOL": "Commodities", "IGLN": "Commodities",
 
     # --- Fixed income funds ---
     "AGG": "Fixed Income", "BND": "Fixed Income", "TLT": "Fixed Income",
     "IEF": "Fixed Income", "SHY": "Fixed Income", "LQD": "Fixed Income",
-    "HYG": "Fixed Income", "TIP": "Fixed Income",
+    "HYG": "Fixed Income", "TIP": "Fixed Income", "HIEM": "Fixed Income",
 }
 
 
