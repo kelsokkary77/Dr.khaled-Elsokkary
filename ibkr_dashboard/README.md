@@ -106,6 +106,59 @@ again — it rebuilds from scratch.
 
 ---
 
+## Using it on your phone
+
+By default this only answers on your Mac (`127.0.0.1`) — nothing else on
+your network can reach it, and there's no login screen. To open it from
+your phone, you need both: a password, and a way for your phone to reach
+your Mac.
+
+### 1. Set a password
+
+In `.env`, set:
+
+```ini
+IBKR_AUTH_USERNAME=pick_a_username
+IBKR_AUTH_PASSWORD=pick_a_strong_password
+```
+
+Restart the dashboard. Every page and API call now asks for that
+username and password — your browser (and your phone's) remembers it
+after the first time, the same way any site login does.
+
+### 2. Let your phone reach your Mac, via Tailscale
+
+[Tailscale](https://tailscale.com) creates a private network between only
+your own devices — not a public URL anyone could stumble onto. It's free
+for personal use.
+
+1. Install Tailscale on your Mac from <https://tailscale.com/download> and
+   sign in.
+2. Install the Tailscale app on your iPhone (App Store) and sign in with
+   the **same account**.
+3. In `.env`, add:
+
+   ```ini
+   IBKR_HOST=0.0.0.0
+   ```
+
+   (Without this, the server only listens on `127.0.0.1` and Tailscale has
+   nothing to forward to.)
+4. Restart the dashboard on your Mac.
+5. On your Mac, click the Tailscale icon in the menu bar and note its
+   address — something like `100.x.x.x`.
+6. On your phone, open Safari or Chrome and go to
+   `http://100.x.x.x:8787` (your Mac's actual address). Enter the
+   username and password from step 1.
+
+Your phone needs the Tailscale app installed and signed in for that
+address to resolve — it isn't reachable from a phone without it.
+
+**Optional:** in Safari on your phone, tap **Share → Add to Home
+Screen** to get an app-like icon that opens straight to the dashboard.
+
+---
+
 ## Choosing a data source
 
 | | **Flex Web Service** | **Client Portal Web API** |
@@ -281,7 +334,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-87 tests, none of which touch the network: Flex parsing runs against
+92 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, and the API tests run the demo provider through
 FastAPI's `TestClient`.
 
@@ -312,9 +365,13 @@ account, so a CDN reference should fail the build rather than ship.
 
 - `.env` is gitignored. Treat a Flex token like a password — it can read your
   full account history.
-- The server binds to `127.0.0.1` by default. It has no authentication, so do
-  not expose it on a network you share.
-- Nothing leaves your machine except the calls to IBKR.
+- The server binds to `127.0.0.1` by default and has no login screen. Do not
+  set `IBKR_HOST=0.0.0.0` or expose it on a shared network **without** also
+  setting `IBKR_AUTH_USERNAME` / `IBKR_AUTH_PASSWORD` (see "Using it on your
+  phone" above) — without that, anyone who can reach the address sees
+  everything, no login required.
+- Nothing leaves your machine except the calls to IBKR (and, if you set one
+  up, your own Tailscale tunnel to your own devices).
 - Both providers are read-only. Neither the Flex token nor the endpoints this
   dashboard calls can place, modify or cancel an order.
 

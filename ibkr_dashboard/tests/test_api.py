@@ -128,6 +128,54 @@ def test_dashboard_without_data_and_without_sync_raises(settings, tmp_path):
         service.dashboard(allow_sync=False)
 
 
+# --------------------------------------------------------------- basic auth
+
+
+def _protected_client(tmp_path, monkeypatch, username: str = "doc", password: str = "secret"):
+    from backend import main
+
+    protected = Settings(
+        provider="demo",
+        db_path=tmp_path / "auth.sqlite3",
+        auth_username=username,
+        auth_password=password,
+    )
+    monkeypatch.setattr(main, "settings", protected)
+    monkeypatch.setattr(
+        main, "service", DashboardService(protected, SnapshotStore(protected.db_path))
+    )
+    return TestClient(main.app)
+
+
+def test_no_credentials_configured_means_no_login_prompt(client):
+    assert client.get("/api/health").status_code == 200
+
+
+def test_missing_credentials_are_rejected(tmp_path, monkeypatch):
+    client = _protected_client(tmp_path, monkeypatch)
+    resp = client.get("/api/health")
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"].startswith("Basic")
+
+
+def test_wrong_password_is_rejected(tmp_path, monkeypatch):
+    client = _protected_client(tmp_path, monkeypatch)
+    resp = client.get("/api/health", auth=("doc", "wrong"))
+    assert resp.status_code == 401
+
+
+def test_correct_credentials_are_accepted(tmp_path, monkeypatch):
+    client = _protected_client(tmp_path, monkeypatch)
+    resp = client.get("/api/health", auth=("doc", "secret"))
+    assert resp.status_code == 200
+
+
+def test_auth_protects_the_frontend_too(tmp_path, monkeypatch):
+    client = _protected_client(tmp_path, monkeypatch)
+    assert client.get("/").status_code == 401
+    assert client.get("/static/app.js").status_code == 401
+
+
 def test_stored_nav_history_outlives_a_single_snapshot(settings, tmp_path):
     """A cpapi-style point-in-time sync accumulates into a real series."""
     from backend.models import AccountSummary, NavPoint, PortfolioSnapshot
