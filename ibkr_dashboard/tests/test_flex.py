@@ -83,9 +83,46 @@ def test_missing_subcategory_falls_back_to_unclassified(parsed):
 
 
 def test_non_base_position_is_converted_to_base_currency(parsed):
+    """ASML here has no positionValue/costBasisMoney at all -- market_value
+    is built from scratch (quantity * markPrice * fxRateToBase), which was
+    always fx-aware. See test_non_base_position_with_reported_value_is_still_
+    converted below for the real-world case that was actually broken."""
     asml = next(p for p in parsed.positions if p.symbol == "ASML")
     assert asml.market_value == pytest.approx(2 * 700 * 1.08)
     assert asml.unrealized_pnl == pytest.approx(2 * 100 * 1.08)
+
+
+FOREIGN_POSITION_VALUE_STATEMENT = """<FlexQueryResponse queryName="Dash" type="AF">
+ <FlexStatements count="1">
+  <FlexStatement accountId="U1234567" fromDate="2026-01-01" toDate="2026-09-16">
+   <AccountInformation accountId="U1234567" acctAlias="Main" currency="USD"
+                       accountType="INDIVIDUAL"/>
+   <OpenPositions>
+     <OpenPosition currency="EUR" fxRateToBase="1.1391" assetCategory="STK" symbol="ARGX"
+       description="ARGENX SE" conid="160209909" position="4" markPrice="845.2"
+       positionValue="3380.8" costBasisPrice="715.54419" costBasisMoney="2862.17676"
+       fifoPnlUnrealized="518.62324" multiplier="1"/>
+   </OpenPositions>
+   <Trades/>
+  </FlexStatement>
+ </FlexStatements>
+</FlexQueryResponse>"""
+
+
+def test_non_base_position_with_reported_value_is_still_converted():
+    """IBKR's real Flex export -- unlike the simplified fixture above -- does
+    report positionValue/costBasisMoney/fifoPnlUnrealized directly, and it
+    reports them in the position's OWN currency (EUR here), same as the Cash
+    Report section without its *InBase columns. Taking that number as-is
+    silently treats EUR/GBP holdings as if they were already in dollars."""
+    snapshot = PortfolioSnapshot(provider="flex")
+    flex.FlexProvider(Settings())._merge(
+        snapshot, FOREIGN_POSITION_VALUE_STATEMENT, "999", []
+    )
+    argx = snapshot.positions[0]
+    assert argx.market_value == pytest.approx(3380.8 * 1.1391)
+    assert argx.cost_basis == pytest.approx(2862.17676 * 1.1391)
+    assert argx.unrealized_pnl == pytest.approx(518.62324 * 1.1391)
 
 
 def test_base_summary_cash_row_is_excluded(parsed):

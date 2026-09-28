@@ -221,6 +221,7 @@ def _parse_positions(statement: ET.Element, account_id: str = "") -> list[Positi
         if not quantity:
             continue
         symbol = _attr(node, "symbol")
+        fx_rate = _num(node, "fxRateToBase") or 1.0
         out.append(
             Position(
                 symbol=symbol,
@@ -238,10 +239,17 @@ def _parse_positions(statement: ET.Element, account_id: str = "") -> list[Positi
                 multiplier=_num(node, "multiplier") or 1.0,
                 mark_price=_num(node, "markPrice"),
                 cost_basis_price=_num(node, "costBasisPrice", "openPrice"),
-                market_value=_num(node, "positionValue", "marketValue"),
-                cost_basis=_num(node, "costBasisMoney"),
-                unrealized_pnl=_num(node, "fifoPnlUnrealized", "unrealizedPnl"),
-                fx_rate_to_base=_num(node, "fxRateToBase") or 1.0,
+                # Unlike the Cash Report section (which has an explicit
+                # *InBase variant of each field), Open Positions reports
+                # these three in the position's OWN currency -- IBKR expects
+                # the reader to apply fxRateToBase itself. Left alone, a
+                # EUR/GBP holding's value is silently treated as if it were
+                # already in dollars, undercounting (or overcounting) it in
+                # every USD total on the dashboard.
+                market_value=_num(node, "positionValue", "marketValue") * fx_rate,
+                cost_basis=_num(node, "costBasisMoney") * fx_rate,
+                unrealized_pnl=_num(node, "fifoPnlUnrealized", "unrealizedPnl") * fx_rate,
+                fx_rate_to_base=fx_rate,
                 # A row's own accountId (present when a statement mixes rows
                 # from more than one linked account) always wins over the
                 # statement-wide default -- otherwise every row in a mixed
