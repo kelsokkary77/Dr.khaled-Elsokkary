@@ -373,6 +373,163 @@ export function lineChart(container, options) {
   });
 }
 
+/* -------------------------------------------------------- multi-series line */
+
+/**
+ * Several time series sharing one x-axis and one y-axis (e.g. % change from
+ * a shared start date for a portfolio and its benchmarks). More than one
+ * series, so a legend is always shown elsewhere -- color carries identity
+ * here the same way it does for any multi-series chart in this file.
+ */
+export function multiLineChart(container, options) {
+  const {
+    series = [], // [{ label, color, points: [{ [xKey]: ..., [yKey]: ... }] }]
+    xKey = "x",
+    yKey = "y",
+    height = 300,
+    valueFormat = (v) => fmt.signedPct(v),
+    tickFormat = (v) => fmt.signedPct(v, 0),
+  } = options;
+
+  const usable = series.filter((s) => s.points && s.points.length >= 2);
+  if (!usable.length) {
+    emptyState(container, "Not enough history yet. Sync again to build the series.");
+    return;
+  }
+
+  const tooltip = attachTooltip(container);
+
+  responsive(container, (width) => {
+    const surface = token("--surface-1");
+    const allValues = usable.flatMap((s) => s.points.map((p) => Number(p[yKey]) || 0));
+    const { ticks, lo, hi } = niceTicks(
+      Math.min(0, ...allValues),
+      Math.max(0, ...allValues),
+      5,
+    );
+
+    const gutterLeft = 62;
+    const pad = { top: 14, right: 16, bottom: 26, left: gutterLeft };
+    const plotW = Math.max(10, width - pad.left - pad.right);
+    const plotH = Math.max(10, height - pad.top - pad.bottom);
+
+    // The reference series for the x-axis and hover index is whichever has
+    // the most points -- the others are shorter only because a benchmark's
+    // trading-day history doesn't line up 1:1 with sync days.
+    const ref = usable.reduce((a, b) => (a.points.length >= b.points.length ? a : b));
+    const xAt = (i) => pad.left + (plotW * i) / (ref.points.length - 1);
+    const yAt = (v) => pad.top + plotH - ((v - lo) / (hi - lo || 1)) * plotH;
+
+    const svg = el("svg", {
+      viewBox: `0 0 ${width} ${height}`,
+      width,
+      height,
+      role: "img",
+      "aria-label": usable.map((s) => s.label).join(" vs. "),
+    });
+
+    for (const t of ticks) {
+      const y = yAt(t);
+      if (y < pad.top - 1 || y > pad.top + plotH + 1) continue;
+      svg.appendChild(
+        el("line", {
+          x1: pad.left, x2: pad.left + plotW, y1: y, y2: y,
+          stroke: token("--grid"), "stroke-width": 1,
+        }),
+      );
+      svg.appendChild(
+        el("text", { x: pad.left - 10, y: y + 3.5, "text-anchor": "end", class: "tick" },
+          tickFormat(t)),
+      );
+    }
+
+    // A zero line reads stronger than the grid -- these are % series, and
+    // "did I beat flat" is the first thing a reader looks for.
+    if (lo < 0 && hi > 0) {
+      const y0 = yAt(0);
+      svg.appendChild(
+        el("line", {
+          x1: pad.left, x2: pad.left + plotW, y1: y0, y2: y0,
+          stroke: token("--axis"), "stroke-width": 1,
+        }),
+      );
+    }
+
+    const maxTicks = Math.max(2, Math.min(6, Math.floor(plotW / 74)));
+    const step = Math.max(1, Math.ceil(ref.points.length / maxTicks));
+    for (let i = 0; i < ref.points.length; i += step) {
+      svg.appendChild(
+        el("text", { x: xAt(i), y: height - 7, "text-anchor": "middle", class: "tick" },
+          fmt.date(ref.points[i][xKey])),
+      );
+    }
+
+    for (const s of usable) {
+      const color = token(s.color || "--series-1");
+      const linePath = s.points
+        .map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(2)},${yAt(Number(p[yKey]) || 0).toFixed(2)}`)
+        .join(" ");
+      svg.appendChild(
+        el("path", {
+          d: linePath, fill: "none", stroke: color,
+          "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+        }),
+      );
+      const lastIdx = s.points.length - 1;
+      svg.appendChild(
+        el("circle", {
+          cx: xAt(lastIdx), cy: yAt(Number(s.points[lastIdx][yKey]) || 0),
+          r: 4.5, fill: color, stroke: surface, "stroke-width": 2,
+        }),
+      );
+    }
+
+    // Hover: one shared crosshair, one tooltip row per series.
+    const crosshair = el("line", {
+      y1: pad.top, y2: pad.top + plotH,
+      stroke: token("--axis"), "stroke-width": 1, opacity: 0,
+    });
+    svg.appendChild(crosshair);
+
+    const hit = el("rect", {
+      x: pad.left, y: pad.top, width: plotW, height: plotH, fill: "transparent",
+    });
+    hit.addEventListener("pointermove", (event) => {
+      const box = svg.getBoundingClientRect();
+      const px = ((event.clientX - box.left) / box.width) * width;
+      const idx = Math.max(
+        0,
+        Math.min(ref.points.length - 1, Math.round(((px - pad.left) / plotW) * (ref.points.length - 1))),
+      );
+      const x = xAt(idx);
+      crosshair.setAttribute("x1", x);
+      crosshair.setAttribute("x2", x);
+      crosshair.setAttribute("opacity", 1);
+
+      const rows = usable
+        .map((s) => {
+          const point = s.points[Math.min(idx, s.points.length - 1)];
+          const value = Number(point[yKey]) || 0;
+          return `<div class="t-row"><span>${s.label}</span><span class="${value >= 0 ? "up" : "down"}">${valueFormat(value)}</span></div>`;
+        })
+        .join("");
+      tooltip.show(
+        `<div class="t-title">${fmt.date(ref.points[idx][xKey], { year: "numeric", month: "short", day: "numeric" })}</div>${rows}`,
+        (x / width) * container.clientWidth,
+        (height / 3),
+      );
+    });
+    hit.addEventListener("pointerleave", () => {
+      crosshair.setAttribute("opacity", 0);
+      tooltip.hide();
+    });
+    svg.appendChild(hit);
+
+    container.querySelector("svg")?.remove();
+    container.insertBefore(svg, container.firstChild);
+  });
+}
+
 /* -------------------------------------------------- horizontal magnitude bars */
 
 /**

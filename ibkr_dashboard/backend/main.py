@@ -162,6 +162,19 @@ def trades(limit: int = Query(default=200, ge=1, le=5000)) -> Any:
         return _fail(exc)
 
 
+@app.get("/api/benchmarks", tags=["data"])
+def benchmarks(
+    symbols: str = Query(
+        default="SPY,QQQ", description="Comma-separated benchmark symbols."
+    ),
+    refresh: bool = Query(
+        default=False, description="Re-fetch even if cached data isn't stale."
+    ),
+) -> Any:
+    wanted = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    return service.benchmarks(wanted, force=refresh)
+
+
 # ------------------------------------------------------------------- frontend
 
 

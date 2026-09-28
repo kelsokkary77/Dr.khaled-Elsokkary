@@ -1,9 +1,11 @@
-import { fmt, lineChart, barsH, divergingBars, donutChart, groupedBarsH, teardown } from "./charts.js";
+import { fmt, lineChart, multiLineChart, barsH, divergingBars, donutChart, groupedBarsH, teardown } from "./charts.js";
 
 const state = {
   data: null,
   currency: "USD",
   navRange: "6M",
+  navCompare: false,
+  benchmarks: null, // lazily loaded on first "Compare" click, then cached
   allocationDim: "by_asset_class",
   positionSort: { key: "market_value", dir: "desc" },
   views: {}, // chartId -> "chart" | "table"
@@ -202,17 +204,52 @@ function renderHero(d) {
 
 /* -------------------------------------------------------------- NAV chart */
 
-const RANGE_DAYS = { "1M": 30, "3M": 91, "6M": 182, "1Y": 365, ALL: Infinity };
+const RANGE_DAYS = { "1W": 7, "1M": 30, "3M": 91, "6M": 182, "1Y": 365, "2Y": 730, ALL: Infinity };
+
+function rangeCutoff(range) {
+  if (range === "YTD") return new Date(new Date().getFullYear(), 0, 1);
+  const days = RANGE_DAYS[range] ?? Infinity;
+  if (!Number.isFinite(days)) return null;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  return cutoff;
+}
 
 function navPointsForRange(d) {
   const points = d.nav.points || [];
-  const days = RANGE_DAYS[state.navRange] ?? Infinity;
-  if (!Number.isFinite(days) || !points.length) return points;
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
+  const cutoff = rangeCutoff(state.navRange);
+  if (!cutoff || !points.length) return points;
   const filtered = points.filter((p) => new Date(`${p.as_of.slice(0, 10)}T00:00:00`) >= cutoff);
   // Never render a one-point line; fall back to the full series.
   return filtered.length >= 2 ? filtered : points;
+}
+
+const BENCHMARK_META = {
+  SPY: { label: "S&P 500 (SPY)", color: "--series-2" },
+  QQQ: { label: "Nasdaq-100 (QQQ)", color: "--series-3" },
+};
+
+async function ensureBenchmarksLoaded() {
+  if (state.benchmarks) return state.benchmarks;
+  try {
+    const res = await fetch("/api/benchmarks");
+    const body = await res.json();
+    state.benchmarks = res.ok
+      ? body
+      : { series: {}, warnings: [body.error || `Could not load benchmark data (HTTP ${res.status}).`] };
+  } catch (err) {
+    state.benchmarks = { series: {}, warnings: [`Could not reach the dashboard server: ${err.message}`] };
+  }
+  return state.benchmarks;
+}
+
+/** [{as_of, <valueKey>}] -> [{as_of, y}] of % change from the first point. */
+function normalizeToPctChange(points, valueKey) {
+  const base = Number(points[0][valueKey]) || 0;
+  return points.map((p) => ({
+    as_of: p.as_of,
+    y: base ? (Number(p[valueKey]) / base - 1) * 100 : 0,
+  }));
 }
 
 function renderNav(d) {
@@ -222,6 +259,7 @@ function renderNav(d) {
   $("#nav-sub").textContent = n.observations
     ? `${n.observations} observations · ${fmt.signedPct(n.total_return_pct)} total · ${fmt.pct(n.volatility_annualized_pct, 1)} annualized volatility`
     : "";
+  $("#nav-legend").hidden = !state.navCompare;
 
   if (state.views.nav === "table") {
     renderTableView("#nav-chart", ["Date", "NAV", "Cash", "Securities"],
@@ -234,12 +272,47 @@ function renderNav(d) {
     return;
   }
 
+  if (state.navCompare) {
+    renderNavCompare(points);
+    return;
+  }
+
   lineChart(showChartView("#nav-chart"), {
     points,
     height: 300,
     currency: state.currency,
     valueLabel: "Net liquidation",
   });
+}
+
+async function renderNavCompare(points) {
+  const container = showChartView("#nav-chart");
+  const seriesList = [
+    { label: "Your portfolio", color: "--series-1", points: normalizeToPctChange(points, "nav") },
+  ];
+
+  if (points.length >= 2) {
+    const bench = await ensureBenchmarksLoaded();
+    const start = points[0].as_of;
+    const end = points[points.length - 1].as_of;
+    for (const [symbol, meta] of Object.entries(BENCHMARK_META)) {
+      const raw = (bench.series && bench.series[symbol]) || [];
+      const windowed = raw.filter((p) => p.as_of >= start && p.as_of <= end);
+      if (windowed.length >= 2) {
+        seriesList.push({ label: meta.label, color: meta.color, points: normalizeToPctChange(windowed, "close") });
+      }
+    }
+    if (bench.warnings && bench.warnings.length && !container.dataset.benchWarned) {
+      container.dataset.benchWarned = "1";
+      $("#nav-sub").textContent += ` · ${bench.warnings[0]}`;
+    }
+  }
+
+  // A stale chart from a previous render (e.g. still fetching benchmarks)
+  // must not linger under the new one once this resolves.
+  if (state.navCompare && state.views.nav !== "table") {
+    multiLineChart(container, { series: seriesList, xKey: "as_of", height: 300 });
+  }
 }
 
 /* -------------------------------------------------------- category color */
@@ -685,6 +758,14 @@ function initControls() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !$("#drilldown-overlay").hidden) closeGroupDrilldown();
+  });
+
+  $("#nav-compare").addEventListener("click", () => {
+    state.navCompare = !state.navCompare;
+    const btn = $("#nav-compare");
+    btn.setAttribute("aria-pressed", String(state.navCompare));
+    btn.textContent = state.navCompare ? "Hide comparison" : "Compare to S&P 500 / Nasdaq";
+    renderNav(state.data);
   });
 
   $$("[data-range]").forEach((btn) => {

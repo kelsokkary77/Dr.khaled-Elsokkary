@@ -109,6 +109,43 @@ def test_flex_setup_instructions_are_exposed(client):
     assert any("Flex Web Service" in s for s in steps)
 
 
+# ------------------------------------------------------------- benchmarks
+
+
+def test_benchmarks_route_returns_every_default_symbol(client, monkeypatch):
+    from backend.providers import benchmarks as benchmarks_provider
+
+    monkeypatch.setattr(
+        benchmarks_provider,
+        "fetch_benchmark_series",
+        lambda symbol, days: [{"as_of": "2026-01-01", "close": 100.0}],
+    )
+    body = client.get("/api/benchmarks").json()
+    assert body["series"]["SPY"] == [{"as_of": "2026-01-01", "close": 100.0}]
+    assert body["series"]["QQQ"] == [{"as_of": "2026-01-01", "close": 100.0}]
+    assert body["warnings"] == []
+
+
+def test_benchmarks_route_respects_the_symbols_param(client, monkeypatch):
+    from backend.providers import benchmarks as benchmarks_provider
+
+    monkeypatch.setattr(benchmarks_provider, "fetch_benchmark_series", lambda symbol, days: [])
+    body = client.get("/api/benchmarks?symbols=SPY").json()
+    assert set(body["series"]) == {"SPY"}
+
+
+def test_benchmarks_route_reports_a_fetch_failure_as_a_warning(client, monkeypatch):
+    from backend.providers import benchmarks as benchmarks_provider
+
+    def failing(symbol, days):
+        raise ProviderError(f"could not reach {symbol}")
+
+    monkeypatch.setattr(benchmarks_provider, "fetch_benchmark_series", failing)
+    body = client.get("/api/benchmarks?symbols=SPY").json()
+    assert "could not reach SPY" in body["warnings"][0]
+    assert body["series"]["SPY"] == []
+
+
 # ------------------------------------------------------------ service layer
 
 

@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import threading
-from typing import Any
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable
 
 from . import analytics
 from .config import Settings
 from .models import PortfolioSnapshot
 from .providers import ProviderError, get_provider
+from .providers import benchmarks as benchmarks_provider
 from .store import SnapshotStore
+
+# Daily-close data doesn't change intraday -- refetching more than once a day
+# would just be hammering a free, keyless source for the same numbers.
+BENCHMARK_REFRESH_HOURS = 20
 
 
 class DashboardService:
@@ -77,6 +83,72 @@ class DashboardService:
         payload["last_sync"] = self.store.last_sync()
         payload["storage"] = self.store.counts()
         return payload
+
+    # --------------------------------------------------------------- benchmarks
+
+    def benchmarks(
+        self,
+        symbols: list[str] | None = None,
+        force: bool = False,
+        fetch_fn: Callable[[str, int], list[dict]] | None = None,
+    ) -> dict[str, Any]:
+        """S&P 500 / Nasdaq daily closes for the NAV chart's comparison
+        overlay, cached in SQLite and refetched at most once a day (or when
+        the cached history doesn't reach back far enough for what's asked).
+
+        fetch_fn defaults to the real network fetch, looked up on the module
+        rather than bound as a default argument, so tests can monkeypatch
+        backend.providers.benchmarks.fetch_benchmark_series and have it take
+        effect on every call site, not just ones that pass fetch_fn directly.
+        """
+        fetch = fetch_fn or benchmarks_provider.fetch_benchmark_series
+        wanted = [s for s in (symbols or benchmarks_provider.BENCHMARKS) if s in benchmarks_provider.BENCHMARKS]
+        days_needed = self._benchmark_days_needed()
+
+        series: dict[str, list[dict]] = {}
+        warnings: list[str] = []
+        for symbol in wanted:
+            if force or self._benchmark_needs_refresh(symbol, days_needed):
+                try:
+                    points = fetch(symbol, days_needed)
+                    self.store.save_benchmark_series(symbol, points)
+                except ProviderError as exc:
+                    warnings.append(str(exc))
+            series[symbol] = self.store.benchmark_series(symbol)
+
+        return {"series": series, "warnings": warnings}
+
+    def _benchmark_days_needed(self) -> int:
+        """At least enough to cover every NAV point on record, so the "All"
+        time range has something to compare against too."""
+        nav_points = self.store.nav_series()
+        if not nav_points:
+            return 800
+        earliest = min(p.as_of for p in nav_points)
+        try:
+            span = (date.today() - date.fromisoformat(earliest)).days + 5
+        except ValueError:
+            return 800
+        return max(span, 30)
+
+    def _benchmark_needs_refresh(self, symbol: str, days_needed: int) -> bool:
+        last_fetched = self.store.benchmark_last_fetched(symbol)
+        if not last_fetched:
+            return True
+        try:
+            fetched_at = datetime.fromisoformat(last_fetched)
+        except ValueError:
+            return True
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - fetched_at > timedelta(hours=BENCHMARK_REFRESH_HOURS):
+            return True
+
+        earliest = self.store.benchmark_earliest(symbol)
+        if not earliest:
+            return True
+        needed_from = (date.today() - timedelta(days=days_needed)).isoformat()
+        return earliest > needed_from
 
     def status(self) -> dict[str, Any]:
         snapshot = self.store.latest_snapshot()
