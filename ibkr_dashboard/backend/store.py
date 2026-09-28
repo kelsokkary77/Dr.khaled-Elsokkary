@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS sync_log (
     ok          INTEGER NOT NULL,
     message     TEXT    NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS benchmark_history (
+    symbol      TEXT    NOT NULL,
+    as_of       TEXT    NOT NULL,
+    close       REAL    NOT NULL,
+    fetched_at  TEXT    NOT NULL,
+    PRIMARY KEY (symbol, as_of)
+);
 """
 
 
@@ -118,6 +126,21 @@ class SnapshotStore:
             )
         return len(rows)
 
+    def save_benchmark_series(self, symbol: str, points: list[dict]) -> int:
+        if not points:
+            return 0
+        fetched_at = utcnow_iso()
+        rows = [(symbol, p["as_of"], p["close"], fetched_at) for p in points]
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO benchmark_history (symbol, as_of, close, fetched_at)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(symbol, as_of) DO UPDATE SET"
+                "   close=excluded.close, fetched_at=excluded.fetched_at",
+                rows,
+            )
+        return len(rows)
+
     def log_sync(self, provider: str, ok: bool, message: str = "") -> None:
         with self._connect() as conn:
             conn.execute(
@@ -166,6 +189,36 @@ class SnapshotStore:
                 )
                 for r in cur.fetchall()
             ]
+
+    def benchmark_series(self, symbol: str) -> list[dict]:
+        with self._connect() as conn, closing(
+            conn.execute(
+                "SELECT as_of, close FROM benchmark_history"
+                " WHERE symbol = ? ORDER BY as_of ASC",
+                (symbol,),
+            )
+        ) as cur:
+            return [{"as_of": r["as_of"], "close": r["close"]} for r in cur.fetchall()]
+
+    def benchmark_earliest(self, symbol: str) -> str | None:
+        with self._connect() as conn, closing(
+            conn.execute(
+                "SELECT MIN(as_of) AS earliest FROM benchmark_history WHERE symbol = ?",
+                (symbol,),
+            )
+        ) as cur:
+            row = cur.fetchone()
+        return row["earliest"] if row and row["earliest"] else None
+
+    def benchmark_last_fetched(self, symbol: str) -> str | None:
+        with self._connect() as conn, closing(
+            conn.execute(
+                "SELECT MAX(fetched_at) AS latest FROM benchmark_history WHERE symbol = ?",
+                (symbol,),
+            )
+        ) as cur:
+            row = cur.fetchone()
+        return row["latest"] if row and row["latest"] else None
 
     def last_sync(self) -> dict[str, Any] | None:
         with self._connect() as conn, closing(

@@ -15,7 +15,7 @@ and never places orders — every IBKR call it makes is read-only.
 | Section | Shows |
 |---|---|
 | **Hero + tiles** | Net liquidation value, day change, cash, securities, unrealized and realized P&L, top-5 weight, max drawdown |
-| **NAV chart** | Net liquidation over time, with crosshair, tooltip and 1M/3M/6M/1Y/All ranges |
+| **NAV chart** | Net liquidation over time, with crosshair, tooltip, 1W/1M/3M/6M/YTD/1Y/2Y/All ranges, and an optional overlay comparing your % return against the S&P 500 (SPY) and Nasdaq-100 (QQQ) over the same range |
 | **Allocation** | Market value by asset class, sector, security type, currency or country — click a bar to see the holdings behind it |
 | **Holdings by market value** | Every open position, largest first |
 | **Position weight** | Donut of every holding's share of the book — no top-N, no "Other" bucket |
@@ -298,6 +298,21 @@ adding a duplicate.
 line and are not stripped out, so a deposit reads as a gain. For a
 time-weighted return, use IBKR's own PortfolioAnalyst report.
 
+### Comparing to the market
+
+Click **Compare to S&P 500 / Nasdaq** above the chart to overlay your
+portfolio's % change against the S&P 500 (via the SPY ETF) and the
+Nasdaq-100 (via the QQQ ETF), all normalized to the same starting point over
+whichever time range is selected. ETFs are used rather than the raw indexes
+because they're what you could have actually bought instead — an index
+itself isn't a security.
+
+Daily closes come from [Stooq](https://stooq.com), a free source that needs
+no account or API key, and are cached in the same local `ibkr.sqlite3` so
+they're refetched at most once a day. If that source is unreachable, the
+portfolio line still renders on its own and a short note explains why the
+comparison lines are missing.
+
 ---
 
 ## Sector vs. security type
@@ -343,6 +358,7 @@ The frontend is just a client of these. Everything returns JSON.
 | `GET` | `/api/nav` | NAV series plus return, volatility, drawdown |
 | `GET` | `/api/allocation` | Asset class, sector, currency, country |
 | `GET` | `/api/trades` | Trades and monthly activity. `?limit=` |
+| `GET` | `/api/benchmarks` | S&P 500 / Nasdaq daily closes for the NAV comparison overlay. `?symbols=`, `?refresh=` |
 
 Interactive docs are at `/docs`.
 
@@ -363,7 +379,8 @@ ibkr_dashboard/
 │   ├── providers/
 │   │   ├── demo.py      Offline sample portfolio
 │   │   ├── flex.py      Flex Web Service (XML, two-step polling)
-│   │   └── cpapi.py     Client Portal Web API (local gateway)
+│   │   ├── cpapi.py     Client Portal Web API (local gateway)
+│   │   └── benchmarks.py  S&P 500 / Nasdaq daily closes (Stooq, no API key)
 │   ├── analytics.py     Allocation, concentration, drawdown, activity
 │   ├── sector_map.py    Built-in ticker -> sector lookup (see below)
 │   ├── store.py         SQLite snapshot cache + NAV history
@@ -406,9 +423,10 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-109 tests, none of which touch the network: Flex parsing runs against
-representative statement XML, and the API tests run the demo provider through
-FastAPI's `TestClient`.
+132 tests, none of which touch the network: Flex parsing runs against
+representative statement XML, benchmark fetching monkeypatches `httpx.get`
+with representative Stooq CSV responses, and the API tests run the demo
+provider through FastAPI's `TestClient`.
 
 The sector-colored and part-to-whole charts were additionally stress-tested
 against a real 41-holding, 9-sector portfolio export (not the 12-holding demo

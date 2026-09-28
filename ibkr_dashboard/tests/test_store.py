@@ -86,3 +86,42 @@ def test_schema_is_created_on_a_fresh_path(tmp_path):
     nested = tmp_path / "deep" / "dir" / "ibkr.sqlite3"
     assert SnapshotStore(nested).counts() == {"snapshots": 0, "nav_points": 0}
     assert nested.exists()
+
+
+# --------------------------------------------------------------- benchmarks
+
+
+def test_benchmark_series_round_trips(store):
+    store.save_benchmark_series(
+        "SPY", [{"as_of": "2026-01-02", "close": 470.0}, {"as_of": "2026-01-01", "close": 468.0}]
+    )
+    series = store.benchmark_series("SPY")
+    assert [p["as_of"] for p in series] == ["2026-01-01", "2026-01-02"]
+    assert series[1]["close"] == 470.0
+
+
+def test_benchmark_rows_upsert_on_the_same_date(store):
+    store.save_benchmark_series("SPY", [{"as_of": "2026-01-01", "close": 468.0}])
+    store.save_benchmark_series("SPY", [{"as_of": "2026-01-01", "close": 469.5}])
+    series = store.benchmark_series("SPY")
+    assert len(series) == 1 and series[0]["close"] == 469.5
+
+
+def test_benchmark_series_is_scoped_per_symbol(store):
+    store.save_benchmark_series("SPY", [{"as_of": "2026-01-01", "close": 468.0}])
+    store.save_benchmark_series("QQQ", [{"as_of": "2026-01-01", "close": 400.0}])
+    assert len(store.benchmark_series("SPY")) == 1
+    assert len(store.benchmark_series("QQQ")) == 1
+
+
+def test_unknown_benchmark_symbol_has_no_earliest_or_last_fetched(store):
+    assert store.benchmark_earliest("SPY") is None
+    assert store.benchmark_last_fetched("SPY") is None
+
+
+def test_benchmark_earliest_and_last_fetched_are_tracked(store):
+    store.save_benchmark_series(
+        "SPY", [{"as_of": "2026-02-01", "close": 470.0}, {"as_of": "2026-01-01", "close": 468.0}]
+    )
+    assert store.benchmark_earliest("SPY") == "2026-01-01"
+    assert store.benchmark_last_fetched("SPY") is not None
