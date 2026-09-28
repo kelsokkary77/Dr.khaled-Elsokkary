@@ -382,11 +382,19 @@ function renderAllocation(d) {
     return;
   }
 
+  // Each bar is a different named group (a sector, a currency, ...), same as
+  // the Sector allocation donut -- giving every one its own color instead of
+  // one flat hue makes them distinguishable at a glance, and a group's color
+  // stays put across a sync (assigned by label, not by row position).
+  const colors = assignCategoryColors(rows.map((r) => r.label));
+
   barsH(showChartView("#alloc-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: `Allocation by ${DIM_LABEL[state.allocationDim]}`,
     secondary: (row) => `${fmt.pct(row.weight_pct, 1)} of book`,
+    colorFor: (row) => colors.get(row.label),
+    legend: rows.map((r) => ({ label: r.label, color: colors.get(r.label) })),
     onRowClick: (row) => openGroupDrilldown(state.allocationDim, row),
   });
 }
