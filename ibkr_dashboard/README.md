@@ -307,8 +307,8 @@ whichever time range is selected. ETFs are used rather than the raw indexes
 because they're what you could have actually bought instead — an index
 itself isn't a security.
 
-Daily closes come from [Stooq](https://stooq.com), a free source that needs
-no account or API key, and are cached in the same local `ibkr.sqlite3` so
+Daily closes come from Yahoo Finance's public chart data, which needs no
+account or API key, and are cached in the same local `ibkr.sqlite3` so
 they're refetched at most once a day. If that source is unreachable, the
 portfolio line still renders on its own and a short note explains why the
 comparison lines are missing.
@@ -380,7 +380,7 @@ ibkr_dashboard/
 │   │   ├── demo.py      Offline sample portfolio
 │   │   ├── flex.py      Flex Web Service (XML, two-step polling)
 │   │   ├── cpapi.py     Client Portal Web API (local gateway)
-│   │   └── benchmarks.py  S&P 500 / Nasdaq daily closes (Stooq, no API key)
+│   │   └── benchmarks.py  S&P 500 / Nasdaq daily closes (Yahoo Finance, no key)
 │   ├── analytics.py     Allocation, concentration, drawdown, activity
 │   ├── sector_map.py    Built-in ticker -> sector lookup (see below)
 │   ├── store.py         SQLite snapshot cache + NAV history
@@ -425,7 +425,7 @@ python3 -m pytest tests/ -q
 
 132 tests, none of which touch the network: Flex parsing runs against
 representative statement XML, benchmark fetching monkeypatches `httpx.get`
-with representative Stooq CSV responses, and the API tests run the demo
+with representative Yahoo Finance chart responses, and the API tests run the demo
 provider through FastAPI's `TestClient`.
 
 The sector-colored and part-to-whole charts were additionally stress-tested

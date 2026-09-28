@@ -302,8 +302,12 @@ async function renderNavCompare(points) {
         seriesList.push({ label: meta.label, color: meta.color, points: normalizeToPctChange(windowed, "close") });
       }
     }
-    if (bench.warnings && bench.warnings.length && !container.dataset.benchWarned) {
-      container.dataset.benchWarned = "1";
+    // #nav-sub is rebuilt from scratch at the top of every renderNav() call,
+    // so this never needs (or must not have) a "already showed it" guard --
+    // one used to sit here and silently hid a real, still-true warning on
+    // every render after the first (e.g. the next time a range button was
+    // clicked), even though the underlying fetch was still failing.
+    if (bench.warnings && bench.warnings.length) {
       $("#nav-sub").textContent += ` · ${bench.warnings[0]}`;
     }
   }
