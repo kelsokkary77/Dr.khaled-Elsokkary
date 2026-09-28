@@ -1,4 +1,4 @@
-"""Benchmark CSV parsing, driven by representative Stooq responses."""
+"""Benchmark fetching, driven by representative Yahoo Finance chart responses."""
 
 import httpx
 import pytest
@@ -6,15 +6,29 @@ import pytest
 from backend.providers import benchmarks
 from backend.providers.base import ProviderError
 
-CSV = "Date,Open,High,Low,Close,Volume\n2026-01-01,467.0,469.0,466.0,468.0,1000\n2026-01-02,468.0,471.0,467.5,470.0,1200\n"
+# Two trading days, unix timestamps for 2026-01-01 and 2026-01-02 UTC.
+CHART_PAYLOAD = {
+    "chart": {
+        "result": [
+            {
+                "timestamp": [1767225600, 1767312000],
+                "indicators": {"adjclose": [{"adjclose": [468.0, 470.0]}]},
+            }
+        ],
+        "error": None,
+    }
+}
 
 
 class _FakeResponse:
-    def __init__(self, text: str):
-        self.text = text
+    def __init__(self, payload):
+        self._payload = payload
 
     def raise_for_status(self) -> None:
         pass
+
+    def json(self):
+        return self._payload
 
 
 def test_unknown_symbol_is_rejected():
@@ -22,8 +36,8 @@ def test_unknown_symbol_is_rejected():
         benchmarks.fetch_benchmark_series("MSFT")
 
 
-def test_csv_is_parsed_into_sorted_close_prices(monkeypatch):
-    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(CSV))
+def test_chart_payload_is_parsed_into_sorted_close_prices(monkeypatch):
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(CHART_PAYLOAD))
     points = benchmarks.fetch_benchmark_series("SPY")
     assert points == [
         {"as_of": "2026-01-01", "close": 468.0},
@@ -40,23 +54,45 @@ def test_network_failure_is_a_readable_provider_error(monkeypatch):
         benchmarks.fetch_benchmark_series("SPY")
 
 
-def test_empty_response_is_a_readable_provider_error(monkeypatch):
-    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(""))
-    with pytest.raises(ProviderError, match="no usable data"):
-        benchmarks.fetch_benchmark_series("QQQ")
+def test_non_json_response_is_a_readable_provider_error(monkeypatch):
+    class _NotJson:
+        def raise_for_status(self):
+            pass
 
+        def json(self):
+            raise ValueError("not json")
 
-def test_a_maintenance_page_is_not_mistaken_for_csv(monkeypatch):
-    """A proxy or error page must not surface as a parser crash."""
-    monkeypatch.setattr(
-        httpx, "get", lambda *a, **k: _FakeResponse("<html><body>503</body></html>")
-    )
-    with pytest.raises(ProviderError, match="no usable data"):
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _NotJson())
+    with pytest.raises(ProviderError, match="unreadable response"):
         benchmarks.fetch_benchmark_series("SPY")
 
 
-def test_rows_missing_a_close_are_skipped(monkeypatch):
-    csv_text = "Date,Open,High,Low,Close,Volume\n2026-01-01,467.0,469.0,466.0,,1000\n2026-01-02,468.0,471.0,467.5,470.0,1200\n"
-    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(csv_text))
+def test_an_error_payload_with_no_result_is_a_readable_provider_error(monkeypatch):
+    payload = {"chart": {"result": None, "error": {"code": "Not Found", "description": "No data found"}}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(payload))
+    with pytest.raises(ProviderError, match="No data found"):
+        benchmarks.fetch_benchmark_series("QQQ")
+
+
+def test_rows_with_a_null_close_are_skipped(monkeypatch):
+    payload = {
+        "chart": {
+            "result": [
+                {
+                    "timestamp": [1767225600, 1767312000],
+                    "indicators": {"adjclose": [{"adjclose": [None, 470.0]}]},
+                }
+            ],
+            "error": None,
+        }
+    }
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(payload))
     points = benchmarks.fetch_benchmark_series("SPY")
     assert points == [{"as_of": "2026-01-02", "close": 470.0}]
+
+
+def test_no_rows_at_all_is_a_readable_provider_error(monkeypatch):
+    payload = {"chart": {"result": [{"timestamp": [], "indicators": {"adjclose": [{"adjclose": []}]}}], "error": None}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _FakeResponse(payload))
+    with pytest.raises(ProviderError, match="no usable rows"):
+        benchmarks.fetch_benchmark_series("SPY")
