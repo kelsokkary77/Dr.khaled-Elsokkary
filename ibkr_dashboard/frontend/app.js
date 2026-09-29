@@ -184,6 +184,8 @@ function renderHero(d) {
 
   const losingPositions = d.positions.filter((p) => p.unrealized_pnl < 0);
   const totalLosses = losingPositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+  const winningPositions = d.positions.filter((p) => p.unrealized_pnl > 0);
+  const totalProfits = winningPositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
 
   // Max/min over whatever window the NAV chart's own range buttons currently
   // show -- not the full history -- so this tile always answers "for the
@@ -219,7 +221,7 @@ function renderHero(d) {
   const totalCostBasis = d.positions.reduce((sum, p) => sum + (p.cost_basis || 0), 0);
   const costBasisGainPct = totalCostBasis ? (s.unrealized_pnl / totalCostBasis) * 100 : 0;
 
-  const winners = d.positions.filter((p) => p.unrealized_pnl > 0).length;
+  const winners = winningPositions.length;
   const winRatePct = d.positions.length ? (winners / d.positions.length) * 100 : 0;
 
   // Same range as the Max/Min NLV tiles above -- start and end of whatever
@@ -228,6 +230,12 @@ function renderHero(d) {
   const periodEndNav = rangePoints.length ? rangePoints[rangePoints.length - 1].nav : null;
   const periodChange = periodStartNav && periodEndNav ? periodEndNav - periodStartNav : null;
   const periodChangePct = periodStartNav ? ((periodEndNav / periodStartNav) - 1) * 100 : null;
+
+  // SPY/QQQ over that exact same window -- "how did the market do while my
+  // NAV did what it did" -- using whatever benchmark history render()'s
+  // eager ensureBenchmarksLoaded() call has fetched by now.
+  const spyPeriodReturnPct = computeBenchmarkPeriodReturnPct("SPY", rangePoints);
+  const qqqPeriodReturnPct = computeBenchmarkPeriodReturnPct("QQQ", rangePoints);
 
   // US estate-tax situs: IBKR's own issuerCountryCode already tells us the
   // issuer's country of incorporation (not the listing exchange or trading
@@ -285,6 +293,9 @@ function renderHero(d) {
       note: `${pnlUp ? "Gain" : "Loss"} on open positions`, cls: pnlUp ? "up" : "down" },
     { label: "Realized P&L", value: fmt.currency(s.realized_pnl, c),
       note: "From closed trades", cls: s.realized_pnl >= 0 ? "up" : "down" },
+    { label: "Total profits", value: fmt.currency(totalProfits, c),
+      note: `${winningPositions.length} ${winningPositions.length === 1 ? "position" : "positions"} in the green`,
+      cls: "up" },
     { label: "Total losses", value: fmt.currency(totalLosses, c),
       note: `${losingPositions.length} ${losingPositions.length === 1 ? "position" : "positions"} in the red`,
       cls: "down" },
@@ -305,6 +316,16 @@ function renderHero(d) {
     { label: "Period return", value: periodChange === null ? "--" : fmt.currency(periodChange, c),
       note: periodChangePct === null ? `${state.navRange} range` : `${fmt.signedPct(periodChangePct)} · ${state.navRange} range`,
       cls: periodChange === null ? "" : periodChange >= 0 ? "up" : "down" },
+    { label: "SPY period return", value: spyPeriodReturnPct === null ? "--" : fmt.signedPct(spyPeriodReturnPct, 1),
+      note: spyPeriodReturnPct === null
+        ? (state.benchmarks ? "No SPY data for this range" : "Loading benchmark history...")
+        : `S&P 500 · ${state.navRange} range`,
+      cls: spyPeriodReturnPct === null ? "" : spyPeriodReturnPct >= 0 ? "up" : "down" },
+    { label: "QQQ period return", value: qqqPeriodReturnPct === null ? "--" : fmt.signedPct(qqqPeriodReturnPct, 1),
+      note: qqqPeriodReturnPct === null
+        ? (state.benchmarks ? "No QQQ data for this range" : "Loading benchmark history...")
+        : `Nasdaq-100 · ${state.navRange} range`,
+      cls: qqqPeriodReturnPct === null ? "" : qqqPeriodReturnPct >= 0 ? "up" : "down" },
     { label: "Max drawdown", value: fmt.pct(d.nav.max_drawdown_pct, 1),
       note: d.nav.max_drawdown_date ? `Trough ${fmt.date(d.nav.max_drawdown_date)}` : "",
       cls: "down" },
@@ -420,6 +441,25 @@ function computePortfolioBeta(d) {
     varBench += (benchReturns[i] - meanBench) ** 2;
   }
   return varBench ? cov / varBench : null;
+}
+
+/** How a benchmark moved over the exact same window as the NAV chart's
+ * current range -- the first and last close *within that window*, not the
+ * benchmark's own full history. Returns null until benchmark data has
+ * loaded, or if that symbol has no closes inside the window (e.g. the
+ * benchmark fetch partly failed). */
+function computeBenchmarkPeriodReturnPct(symbol, rangePoints) {
+  const benchPoints = state.benchmarks?.series?.[symbol];
+  if (!benchPoints || !benchPoints.length || rangePoints.length < 2) return null;
+
+  const start = rangePoints[0].as_of;
+  const end = rangePoints[rangePoints.length - 1].as_of;
+  const windowed = benchPoints.filter((p) => p.as_of >= start && p.as_of <= end);
+  if (windowed.length < 2) return null;
+
+  const first = windowed[0].close;
+  const last = windowed[windowed.length - 1].close;
+  return first ? ((last / first) - 1) * 100 : null;
 }
 
 /** [{as_of, <valueKey>}] -> [{as_of, y}] of % change from the first point. */
