@@ -38,6 +38,13 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.environ.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
 def _env_list(key: str) -> list[str]:
     raw = os.environ.get(key, "")
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -76,6 +83,14 @@ class Settings:
     base_currency: str = "USD"
     # Auto-sync on first page load when the cache is empty.
     autosync_on_start: bool = True
+    # Lifetime net deposits (deposits minus withdrawals), entered by hand.
+    # IBKR's Flex Web Service only looks back about a year, so there is no
+    # reliable way to fetch a full-history figure automatically -- and unlike
+    # everything else on this dashboard, it is not something a statement
+    # naturally reports at all, so hand entry here (never in source code,
+    # which anyone running this dashboard on their own account would see) is
+    # the honest option. 0 means "not set" and the tile that uses it says so.
+    total_deposited: float = 0.0
 
     # --- HTTP Basic Auth --- only enabled when both are set. Needed once this
     # server is reachable from anywhere but localhost (e.g. over Tailscale),
@@ -128,6 +143,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         db_path=db_path,
         base_currency=os.environ.get("IBKR_BASE_CURRENCY", "USD").upper(),
         autosync_on_start=_env_bool("IBKR_AUTOSYNC_ON_START", True),
+        total_deposited=_env_float("IBKR_TOTAL_DEPOSITED", 0.0),
         auth_username=os.environ.get("IBKR_AUTH_USERNAME", "").strip(),
         auth_password=os.environ.get("IBKR_AUTH_PASSWORD", "").strip(),
     )

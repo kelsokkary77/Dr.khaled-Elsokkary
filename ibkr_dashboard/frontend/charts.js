@@ -117,7 +117,7 @@ function niceTicks(min, max, count = 5) {
 
 /**
  * Bar path: square at the baseline, 4px rounded at the data end.
- * `dir` is the direction the bar grows: "right" | "left" | "up".
+ * `dir` is the direction the bar grows: "right" | "left" | "up" | "down".
  */
 function barPath(x, y, w, h, dir, r = 4) {
   const radius = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -128,6 +128,11 @@ function barPath(x, y, w, h, dir, r = 4) {
   if (dir === "left") {
     return `M${x + w},${y} H${x + radius} A${radius},${radius} 0 0 0 ${x},${y + radius}
             V${y + h - radius} A${radius},${radius} 0 0 0 ${x + radius},${y + h} H${x + w} Z`;
+  }
+  if (dir === "down") {
+    // grows from a top baseline: square at y, rounded at the data end (y+h)
+    return `M${x},${y} H${x + w} V${y + h - radius} A${radius},${radius} 0 0 1 ${x + w - radius},${y + h}
+            H${x + radius} A${radius},${radius} 0 0 1 ${x},${y + h - radius} Z`;
   }
   // "up": grows from a bottom baseline
   return `M${x},${y + h} V${y + radius} A${radius},${radius} 0 0 1 ${x + radius},${y}
@@ -669,6 +674,146 @@ export function barsH(container, options) {
   });
 }
 
+/* ---------------------------------------------------------- vertical bars */
+
+/**
+ * barsH's column-chart counterpart: one bar per category left to right
+ * instead of top to bottom -- suits many short labels (tickers) better than
+ * one long scrolling list. Never squeezed thinner than legible: past a
+ * point the chart's own natural width exceeds the card and it scrolls
+ * horizontally, the same "grow, don't squeeze" rule barsH applies by
+ * growing taller instead of shrinking its rows.
+ */
+export function barsV(container, options) {
+  const {
+    rows = [],
+    labelKey = "label",
+    valueKey = "value",
+    currency = "USD",
+    height = 320,
+    minSlot = 52,
+    barWidth = 28,
+    color = "--series-1",
+    colorFor,
+    legend,
+    secondary = (row) => `${fmt.pct(row.weight_pct ?? 0, 1)} of book`,
+    onRowClick,
+  } = options;
+
+  if (!rows.length) {
+    emptyState(container, "Nothing to show.");
+    return;
+  }
+
+  const tooltip = attachTooltip(container);
+
+  responsive(container, (containerWidth) => {
+    const hue = token(color);
+    const pad = { top: 14, right: 14, bottom: 34, left: 62 };
+
+    // Never thinner than minSlot -- once that no longer fits, the chart
+    // grows past the card's width and scrolls instead of shrinking bars
+    // into illegibility.
+    const natural = rows.length * minSlot + pad.left + pad.right;
+    const scrolls = natural > containerWidth;
+    container.classList.toggle("h-scroll", scrolls);
+    const width = scrolls ? natural : containerWidth;
+
+    const plotW = Math.max(10, width - pad.left - pad.right);
+    const plotH = Math.max(10, height - pad.top - pad.bottom);
+    const values = rows.map((r) => Math.abs(Number(r[valueKey]) || 0));
+    const { ticks, hi } = niceTicks(0, Math.max(...values, 1), 5);
+
+    const slot = plotW / rows.length;
+    const barW = Math.max(6, Math.min(barWidth, slot - 10));
+
+    const svg = el("svg", {
+      viewBox: `0 0 ${width} ${height}`, width, height,
+      role: "img", "aria-label": options.ariaLabel || "Vertical bar chart",
+    });
+
+    for (const t of ticks) {
+      const y = pad.top + plotH - (t / (hi || 1)) * plotH;
+      if (y < pad.top - 1 || y > pad.top + plotH + 1) continue;
+      svg.appendChild(
+        el("line", {
+          x1: pad.left, x2: pad.left + plotW, y1: y, y2: y,
+          stroke: token("--grid"), "stroke-width": 1,
+        }),
+      );
+      svg.appendChild(
+        el("text", { x: pad.left - 8, y: y + 3.5, "text-anchor": "end", class: "tick" },
+          fmt.compact(t, currency)),
+      );
+    }
+
+    rows.forEach((row, i) => {
+      const value = Number(row[valueKey]) || 0;
+      const barH = Math.max(2, (Math.abs(value) / (hi || 1)) * plotH);
+      const colLeft = pad.left + i * slot;
+      const x = colLeft + (slot - barW) / 2;
+      const y = pad.top + plotH - barH;
+
+      const group = el("g", { class: "bar-col" });
+      const rowHue = colorFor ? token(colorFor(row)) : hue;
+      group.appendChild(el("path", { d: barPath(x, y, barW, barH, "up"), fill: rowHue }));
+      group.appendChild(
+        el("text", {
+          x: colLeft + slot / 2, y: pad.top + plotH + 16,
+          "text-anchor": "middle", class: "mark-label strong",
+        }, row[labelKey]),
+      );
+
+      const hit = el("rect", { x: colLeft, y: pad.top, width: slot, height: plotH, fill: "transparent" });
+      hit.addEventListener("pointerenter", () => {
+        group.querySelector("path").setAttribute("fill-opacity", 0.82);
+      });
+      hit.addEventListener("pointermove", () => {
+        tooltip.show(
+          `<div class="t-title">${row[labelKey]}</div>
+           <div class="t-row"><span>Value</span><span>${fmt.currency(value, currency)}</span></div>
+           <div class="t-row"><span>Share</span><span>${secondary(row)}</span></div>`,
+          colLeft + slot / 2,
+          y,
+        );
+      });
+      hit.addEventListener("pointerleave", () => {
+        group.querySelector("path").removeAttribute("fill-opacity");
+        tooltip.hide();
+      });
+      if (onRowClick) {
+        hit.style.cursor = "pointer";
+        hit.addEventListener("click", () => onRowClick(row));
+      }
+      group.appendChild(hit);
+      svg.appendChild(group);
+    });
+
+    svg.appendChild(
+      el("line", {
+        x1: pad.left, x2: pad.left + plotW, y1: pad.top + plotH, y2: pad.top + plotH,
+        stroke: token("--axis"), "stroke-width": 1,
+      }),
+    );
+
+    container.querySelector("svg")?.remove();
+    container.querySelector(".legend")?.remove();
+    container.insertBefore(svg, container.firstChild);
+
+    if (legend && legend.length) {
+      const legendEl = document.createElement("div");
+      legendEl.className = "legend";
+      legendEl.innerHTML = legend
+        .map(
+          (item) =>
+            `<span class="item"><span class="swatch" style="background:${token(item.color)}"></span>${item.label}</span>`,
+        )
+        .join("");
+      container.appendChild(legendEl);
+    }
+  });
+}
+
 /* ------------------------------------------------------- diverging P&L bars */
 
 /**
@@ -781,6 +926,133 @@ export function divergingBars(container, options) {
            <div class="t-row"><span>Market value</span><span>${fmt.currency(row.market_value ?? 0, currency)}</span></div>`,
           event.clientX - box.left,
           i * rowHeight + rowHeight / 2,
+        );
+      });
+      hit.addEventListener("pointerleave", () => {
+        group.querySelector("path").removeAttribute("fill-opacity");
+        tooltip.hide();
+      });
+      group.appendChild(hit);
+      svg.appendChild(group);
+    });
+
+    container.querySelector("svg")?.remove();
+    container.insertBefore(svg, container.firstChild);
+  });
+}
+
+/* -------------------------------------------------- vertical diverging bars */
+
+/**
+ * divergingBars turned on its side: gains grow up from a shared zero line,
+ * losses grow down from it, arranged left to right. Same polarity rules --
+ * position and a signed label carry the sign, color is never the only
+ * channel -- just transposed to put many short labels (tickers) in a row
+ * instead of a long scrolling list.
+ */
+export function divergingBarsV(container, options) {
+  const {
+    rows = [],
+    labelKey = "symbol",
+    valueKey = "unrealized_pnl",
+    pctKey = "unrealized_pnl_pct",
+    currency = "USD",
+    height = 340,
+    minSlot = 52,
+    barWidth = 28,
+  } = options;
+
+  if (!rows.length) {
+    emptyState(container, "No open positions to compare.");
+    return;
+  }
+
+  const tooltip = attachTooltip(container);
+
+  responsive(container, (containerWidth) => {
+    const pos = token("--pos");
+    const neg = token("--neg");
+    // Extra top and bottom padding over the usual 14px/34px -- the
+    // return-percent label sitting past each bar's tip needs its own
+    // headroom (above for a gain, below for a loss), or the tallest bar's
+    // label would clip against the card edge or collide with the symbol
+    // label underneath.
+    const pad = { top: 26, right: 14, bottom: 46, left: 62 };
+
+    const natural = rows.length * minSlot + pad.left + pad.right;
+    const scrolls = natural > containerWidth;
+    container.classList.toggle("h-scroll", scrolls);
+    const width = scrolls ? natural : containerWidth;
+
+    const values = rows.map((r) => Number(r[valueKey]) || 0);
+    const maxGain = Math.max(0, ...values);
+    const maxLoss = Math.max(0, ...values.map((v) => -v));
+    const span = maxGain + maxLoss || 1;
+
+    const plotW = Math.max(10, width - pad.left - pad.right);
+    const plotH = Math.max(10, height - pad.top - pad.bottom);
+    // One px-per-dollar scale for both arms, same reasoning as divergingBars:
+    // arms differ in length only because the data does.
+    const scale = plotH / span;
+    const zeroY = pad.top + maxGain * scale;
+
+    const slot = plotW / rows.length;
+    const barW = Math.max(6, Math.min(barWidth, slot - 10));
+
+    const svg = el("svg", {
+      viewBox: `0 0 ${width} ${height}`, width, height,
+      role: "img", "aria-label": options.ariaLabel || "Unrealized profit and loss by position",
+    });
+
+    svg.appendChild(
+      el("line", {
+        x1: pad.left, x2: pad.left + plotW, y1: zeroY, y2: zeroY,
+        stroke: token("--axis"), "stroke-width": 1,
+      }),
+    );
+
+    rows.forEach((row, i) => {
+      const value = Number(row[valueKey]) || 0;
+      const gain = value >= 0;
+      const h = Math.max(2, Math.abs(value) * scale);
+      const colLeft = pad.left + i * slot;
+      const x = colLeft + (slot - barW) / 2;
+      const y = gain ? zeroY - h : zeroY;
+
+      const group = el("g");
+      group.appendChild(
+        el("path", { d: barPath(x, y, barW, h, gain ? "up" : "down"), fill: gain ? pos : neg }),
+      );
+      // Return percent, the second channel beside color -- sits just past
+      // the bar's own tip, above for a gain, below for a loss. Capped for a
+      // loss so the largest bar (tip at the plot's bottom edge) never pushes
+      // its label down into the symbol row below.
+      group.appendChild(
+        el("text", {
+          x: colLeft + slot / 2,
+          y: gain ? y - 6 : Math.min(y + h + 13, pad.top + plotH + 13),
+          "text-anchor": "middle", class: "mark-label",
+        }, fmt.signedPct(row[pctKey] ?? 0, 1)),
+      );
+      group.appendChild(
+        el("text", {
+          x: colLeft + slot / 2, y: pad.top + plotH + 28,
+          "text-anchor": "middle", class: "mark-label strong",
+        }, row[labelKey]),
+      );
+
+      const hit = el("rect", { x: colLeft, y: pad.top, width: slot, height: plotH, fill: "transparent" });
+      hit.addEventListener("pointerenter", () => {
+        group.querySelector("path").setAttribute("fill-opacity", 0.82);
+      });
+      hit.addEventListener("pointermove", () => {
+        tooltip.show(
+          `<div class="t-title">${row[labelKey]}${row.description ? ` &middot; ${row.description}` : ""}</div>
+           <div class="t-row"><span>Unrealized</span><span class="${gain ? "up" : "down"}">${fmt.currency(value, currency)}</span></div>
+           <div class="t-row"><span>Return</span><span class="${gain ? "up" : "down"}">${fmt.signedPct(row[pctKey] ?? 0)}</span></div>
+           <div class="t-row"><span>Market value</span><span>${fmt.currency(row.market_value ?? 0, currency)}</span></div>`,
+          colLeft + slot / 2,
+          gain ? y : zeroY + h,
         );
       });
       hit.addEventListener("pointerleave", () => {
@@ -1020,6 +1292,132 @@ export function groupedBarsH(container, options) {
     svg.appendChild(
       el("line", {
         x1: left, x2: left, y1: 2, y2: height - 4,
+        stroke: token("--axis"), "stroke-width": 1,
+      }),
+    );
+
+    container.querySelector("svg")?.remove();
+    container.insertBefore(svg, container.firstChild);
+  });
+}
+
+/* ------------------------------------------------ vertical grouped bars (2 series) */
+
+/**
+ * groupedBarsH turned on its side: two (or more) bars per category grow up
+ * from a shared baseline, side by side within each column, columns arranged
+ * left to right instead of stacked top to bottom -- for many short labels
+ * (tickers). Same fixed, caller-known series colors and legend-in-HTML as
+ * groupedBarsH.
+ */
+export function groupedBarsV(container, options) {
+  const {
+    rows = [],
+    series = [],
+    currency = "USD",
+    height = 320,
+    minSlot = 64,
+    ariaLabel = "Grouped comparison",
+  } = options;
+
+  if (!rows.length || !series.length) {
+    emptyState(container, "Nothing to show.");
+    return;
+  }
+
+  const tooltip = attachTooltip(container);
+
+  responsive(container, (containerWidth) => {
+    const pad = { top: 14, right: 14, bottom: 34, left: 62 };
+
+    const natural = rows.length * minSlot + pad.left + pad.right;
+    const scrolls = natural > containerWidth;
+    container.classList.toggle("h-scroll", scrolls);
+    const width = scrolls ? natural : containerWidth;
+
+    const plotW = Math.max(10, width - pad.left - pad.right);
+    const plotH = Math.max(10, height - pad.top - pad.bottom);
+    const max = Math.max(
+      ...rows.flatMap((r) => series.map((s) => Math.abs(Number(r[s.key]) || 0))),
+      1,
+    );
+    const { ticks, hi } = niceTicks(0, max, 5);
+
+    const slot = plotW / rows.length;
+    const gapBetween = 3;
+    const barW = Math.max(
+      4,
+      Math.floor((Math.min(minSlot, slot) - 14 - gapBetween * (series.length - 1)) / series.length),
+    );
+    const groupWidth = series.length * barW + (series.length - 1) * gapBetween;
+
+    const svg = el("svg", {
+      viewBox: `0 0 ${width} ${height}`, width, height,
+      role: "img", "aria-label": ariaLabel,
+    });
+
+    for (const t of ticks) {
+      const y = pad.top + plotH - (t / (hi || 1)) * plotH;
+      if (y < pad.top - 1 || y > pad.top + plotH + 1) continue;
+      svg.appendChild(
+        el("line", {
+          x1: pad.left, x2: pad.left + plotW, y1: y, y2: y,
+          stroke: token("--grid"), "stroke-width": 1,
+        }),
+      );
+      svg.appendChild(
+        el("text", { x: pad.left - 8, y: y + 3.5, "text-anchor": "end", class: "tick" },
+          fmt.compact(t, currency)),
+      );
+    }
+
+    rows.forEach((row, i) => {
+      const colLeft = pad.left + i * slot;
+      const startX = colLeft + (slot - groupWidth) / 2;
+      const group = el("g");
+
+      series.forEach((s, si) => {
+        const value = Number(row[s.key]) || 0;
+        const barH = Math.max(2, (Math.abs(value) / (hi || 1)) * plotH);
+        const x = startX + si * (barW + gapBetween);
+        const y = pad.top + plotH - barH;
+        group.appendChild(
+          el("path", { d: barPath(x, y, barW, barH, "up", 3), fill: token(s.color) }),
+        );
+      });
+
+      group.appendChild(
+        el("text", {
+          x: colLeft + slot / 2, y: pad.top + plotH + 16,
+          "text-anchor": "middle", class: "mark-label strong",
+        }, row.label),
+      );
+
+      const hit = el("rect", { x: colLeft, y: pad.top, width: slot, height: plotH, fill: "transparent" });
+      hit.addEventListener("pointerenter", () => {
+        group.querySelectorAll("path").forEach((p) => p.setAttribute("fill-opacity", 0.82));
+      });
+      hit.addEventListener("pointermove", () => {
+        const seriesRows = series
+          .map((s) => `<div class="t-row"><span>${s.label}</span><span>${fmt.currency(row[s.key] ?? 0, currency)}</span></div>`)
+          .join("");
+        tooltip.show(
+          `<div class="t-title">${row.label}${row.description ? ` &middot; ${row.description}` : ""}</div>${seriesRows}`,
+          colLeft + slot / 2,
+          pad.top,
+        );
+      });
+      hit.addEventListener("pointerleave", () => {
+        group.querySelectorAll("path").forEach((p) => p.removeAttribute("fill-opacity"));
+        tooltip.hide();
+      });
+      group.appendChild(hit);
+      svg.appendChild(group);
+    });
+
+    svg.appendChild(
+      el("line", {
+        x1: pad.left, x2: pad.left + plotW, y1: pad.top + plotH, y2: pad.top + plotH,
         stroke: token("--axis"), "stroke-width": 1,
       }),
     );

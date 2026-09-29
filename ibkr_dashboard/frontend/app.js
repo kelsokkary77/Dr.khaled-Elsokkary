@@ -1,4 +1,4 @@
-import { fmt, lineChart, multiLineChart, barsH, divergingBars, donutChart, groupedBarsH, teardown } from "./charts.js";
+import { fmt, lineChart, multiLineChart, barsH, barsV, divergingBarsV, donutChart, groupedBarsV, teardown } from "./charts.js";
 
 const state = {
   data: null,
@@ -126,6 +126,12 @@ function render() {
   renderCashTable(d);
   renderTradesTable(d);
   renderFooter(d);
+
+  // The Beta tile needs SPY history that the "Compare" toggle otherwise
+  // only fetches on demand; kick it off here so the tile fills in shortly
+  // after load without the user having to click anything. Cached after the
+  // first call, so this is a no-op on every render after the first.
+  ensureBenchmarksLoaded().then(() => renderHero(state.data));
 }
 
 function renderHeader(d) {
@@ -175,31 +181,161 @@ function renderHero(d) {
     : "";
 
   const pnlUp = s.unrealized_pnl >= 0;
+
+  const losingPositions = d.positions.filter((p) => p.unrealized_pnl < 0);
+  const totalLosses = losingPositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+
+  // Max/min over whatever window the NAV chart's own range buttons currently
+  // show -- not the full history -- so this tile always answers "for the
+  // period I'm looking at", same as the chart above it.
+  const rangePoints = navPointsForRange(d);
+  const navValues = rangePoints.map((p) => p.nav).filter((v) => v !== null && v !== undefined);
+  const maxNavPoint = navValues.length
+    ? rangePoints.find((p) => p.nav === Math.max(...navValues))
+    : null;
+  const minNavPoint = navValues.length
+    ? rangePoints.find((p) => p.nav === Math.min(...navValues))
+    : null;
+
+  const positionCount = d.concentration.position_count;
+
+  // Each position's own share of NLV, plus the mean of those exact numbers
+  // -- so "average position size" and the above/below split below can never
+  // quietly disagree with each other over rounding or which total they used.
+  const positionsWithNlvShare = d.positions.map((p) => ({
+    ...p,
+    pct_of_nlv: s.net_liquidation ? (Math.abs(p.market_value) / s.net_liquidation) * 100 : 0,
+  }));
+  const avgPositionPct = positionsWithNlvShare.length
+    ? positionsWithNlvShare.reduce((sum, p) => sum + p.pct_of_nlv, 0) / positionsWithNlvShare.length
+    : 0;
+  const abovePositions = positionsWithNlvShare
+    .filter((p) => p.pct_of_nlv > avgPositionPct)
+    .sort((a, b) => b.pct_of_nlv - a.pct_of_nlv);
+  const belowPositions = positionsWithNlvShare
+    .filter((p) => p.pct_of_nlv <= avgPositionPct)
+    .sort((a, b) => b.pct_of_nlv - a.pct_of_nlv);
+
+  const totalCostBasis = d.positions.reduce((sum, p) => sum + (p.cost_basis || 0), 0);
+  const costBasisGainPct = totalCostBasis ? (s.unrealized_pnl / totalCostBasis) * 100 : 0;
+
+  const winners = d.positions.filter((p) => p.unrealized_pnl > 0).length;
+  const winRatePct = d.positions.length ? (winners / d.positions.length) * 100 : 0;
+
+  // Same range as the Max/Min NLV tiles above -- start and end of whatever
+  // window the NAV chart is currently showing, not the full history.
+  const periodStartNav = rangePoints.length ? rangePoints[0].nav : null;
+  const periodEndNav = rangePoints.length ? rangePoints[rangePoints.length - 1].nav : null;
+  const periodChange = periodStartNav && periodEndNav ? periodEndNav - periodStartNav : null;
+  const periodChangePct = periodStartNav ? ((periodEndNav / periodStartNav) - 1) * 100 : null;
+
+  // US estate-tax situs: IBKR's own issuerCountryCode already tells us the
+  // issuer's country of incorporation (not the listing exchange or trading
+  // currency), which is exactly the test IRC 2104/2105 uses -- stock of a
+  // US-incorporated company or a US-domiciled fund is US-situs; a foreign
+  // company's stock or ADR, and an Irish/Luxembourg UCITS ETF, is not, no
+  // matter where or in what currency it trades. This is a best-effort read
+  // of that one field, not tax advice -- a redomiciled issuer or a data gap
+  // could still throw it off, so treat it as a tracking aid, not a verdict.
+  const usSitusValue = d.positions
+    .filter((p) => (p.country || "").toUpperCase() === "US")
+    .reduce((sum, p) => sum + p.market_value, 0);
+  const usSitusExemption = 60000;
+
+  const beta = computePortfolioBeta(d);
+
+  // Entered by hand in .env (IBKR_TOTAL_DEPOSITED), never in source code --
+  // see config.py for why this can't be fetched reliably from IBKR itself.
+  const totalDeposited = d.total_deposited || 0;
+  const depositReturnPct = totalDeposited
+    ? ((s.net_liquidation - totalDeposited) / totalDeposited) * 100
+    : null;
+  const betaNote = beta !== null
+    ? "Empirical, from daily NAV vs. SPY"
+    : state.benchmarks
+      ? "Benchmark data unavailable right now"
+      : "Loading benchmark history...";
+
   const tiles = [
+    // --- Size & composition ---
     { label: "Securities", value: fmt.currency(s.securities_gross_value, c),
       note: `${d.concentration.position_count} positions` },
     { label: "Cash", value: fmt.currency(s.total_cash, c),
       note: `${d.cash.length} ${d.cash.length === 1 ? "currency" : "currencies"}` },
+    { label: "Top 5 weight", value: fmt.pct(d.concentration.top5_pct, 1),
+      note: `Behaves like ${fmt.number(d.concentration.effective_holdings, 1)} equal positions` },
+    { label: "Avg. position size", value: fmt.pct(avgPositionPct, 2),
+      note: `${positionCount} holdings · share of NLV` },
+    { label: "Above avg. position", value: `${abovePositions.length}`,
+      note: `of ${positionCount} · click to see which`,
+      onClick: () => openPositionListDrilldown(
+        "Above-average position size",
+        `${abovePositions.length} of ${positionCount} positions, each over ${fmt.pct(avgPositionPct, 2)} of NLV`,
+        abovePositions,
+      ) },
+    { label: "Below avg. position", value: `${belowPositions.length}`,
+      note: `of ${positionCount} · click to see which`,
+      onClick: () => openPositionListDrilldown(
+        "Below-average position size",
+        `${belowPositions.length} of ${positionCount} positions, each at or under ${fmt.pct(avgPositionPct, 2)} of NLV`,
+        belowPositions,
+      ) },
+    // --- Performance ---
     { label: "Unrealized P&L", value: fmt.currency(s.unrealized_pnl, c),
       note: `${pnlUp ? "Gain" : "Loss"} on open positions`, cls: pnlUp ? "up" : "down" },
     { label: "Realized P&L", value: fmt.currency(s.realized_pnl, c),
       note: "From closed trades", cls: s.realized_pnl >= 0 ? "up" : "down" },
-    { label: "Top 5 weight", value: fmt.pct(d.concentration.top5_pct, 1),
-      note: `Behaves like ${fmt.number(d.concentration.effective_holdings, 1)} equal positions` },
+    { label: "Total losses", value: fmt.currency(totalLosses, c),
+      note: `${losingPositions.length} ${losingPositions.length === 1 ? "position" : "positions"} in the red`,
+      cls: "down" },
+    { label: "Win rate", value: fmt.pct(winRatePct, 1),
+      note: `${winners} of ${d.positions.length} positions profitable` },
+    { label: "Total cost basis", value: fmt.currency(totalCostBasis, c),
+      note: `${fmt.signedPct(costBasisGainPct)} vs. cost basis`, cls: costBasisGainPct >= 0 ? "up" : "down" },
+    { label: "Return on deposits", value: depositReturnPct === null ? "--" : fmt.signedPct(depositReturnPct, 1),
+      note: totalDeposited
+        ? `vs. ${fmt.currency(totalDeposited, c)} deposited`
+        : "Set IBKR_TOTAL_DEPOSITED in .env",
+      cls: depositReturnPct === null ? "" : depositReturnPct >= 0 ? "up" : "down" },
+    // --- Over time ---
+    { label: "Max NLV", value: fmt.currency(maxNavPoint ? maxNavPoint.nav : null, c),
+      note: maxNavPoint ? `${state.navRange} range · ${fmt.date(maxNavPoint.as_of)}` : "No data for this range" },
+    { label: "Min NLV", value: fmt.currency(minNavPoint ? minNavPoint.nav : null, c),
+      note: minNavPoint ? `${state.navRange} range · ${fmt.date(minNavPoint.as_of)}` : "No data for this range" },
+    { label: "Period return", value: periodChange === null ? "--" : fmt.currency(periodChange, c),
+      note: periodChangePct === null ? `${state.navRange} range` : `${fmt.signedPct(periodChangePct)} · ${state.navRange} range`,
+      cls: periodChange === null ? "" : periodChange >= 0 ? "up" : "down" },
     { label: "Max drawdown", value: fmt.pct(d.nav.max_drawdown_pct, 1),
       note: d.nav.max_drawdown_date ? `Trough ${fmt.date(d.nav.max_drawdown_date)}` : "",
       cls: "down" },
+    // --- Risk & tax ---
+    { label: "Beta (vs S&P 500)", value: beta === null ? "--" : fmt.number(beta, 2),
+      note: betaNote },
+    { label: "US-situs value", value: fmt.currency(usSitusValue, c),
+      note: `${fmt.pct((usSitusValue / usSitusExemption) * 100, 0)} of $60,000 estate-tax exemption`,
+      cls: usSitusValue >= usSitusExemption ? "down" : "" },
   ];
 
   $("#tiles").innerHTML = tiles
     .map(
-      (t) => `<div class="tile">
+      (t, i) => `<div class="tile${t.onClick ? " clickable" : ""}"${t.onClick ? ` data-tile-index="${i}" role="button" tabindex="0"` : ""}>
         <div class="label">${t.label}</div>
         <div class="value ${t.cls || ""}">${t.value}</div>
         <div class="delta">${t.note || ""}</div>
       </div>`,
     )
     .join("");
+
+  $$("#tiles .tile.clickable").forEach((el) => {
+    const t = tiles[Number(el.dataset.tileIndex)];
+    el.addEventListener("click", t.onClick);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        t.onClick();
+      }
+    });
+  });
 }
 
 /* -------------------------------------------------------------- NAV chart */
@@ -241,6 +377,49 @@ async function ensureBenchmarksLoaded() {
     state.benchmarks = { series: {}, warnings: [`Could not reach the dashboard server: ${err.message}`] };
   }
   return state.benchmarks;
+}
+
+/**
+ * Empirical beta against SPY: the slope of the portfolio's own daily NAV
+ * moves against the S&P 500's, over whatever history the two series share.
+ * This is a statistical read of how the book has actually behaved, not a
+ * lookup of published per-stock betas -- and like every metric built on the
+ * NAV series (see nav_metrics' own caveat), it is money-weighted, so a
+ * large deposit or withdrawal day would show up as a return and skew it.
+ * Returns null until benchmark history has loaded, or if the two series
+ * don't share enough overlapping days for the estimate to mean anything.
+ */
+function computePortfolioBeta(d) {
+  const benchPoints = state.benchmarks?.series?.SPY;
+  if (!benchPoints || !benchPoints.length) return null;
+
+  const benchByDate = new Map(benchPoints.map((p) => [p.as_of, p.close]));
+  const aligned = (d.nav.points || [])
+    .filter((p) => p.nav && benchByDate.has(p.as_of))
+    .map((p) => ({ nav: p.nav, bench: benchByDate.get(p.as_of) }));
+
+  const navReturns = [];
+  const benchReturns = [];
+  for (let i = 1; i < aligned.length; i++) {
+    const prevNav = aligned[i - 1].nav;
+    const prevBench = aligned[i - 1].bench;
+    if (prevNav && prevBench) {
+      navReturns.push(aligned[i].nav / prevNav - 1);
+      benchReturns.push(aligned[i].bench / prevBench - 1);
+    }
+  }
+  if (navReturns.length < 10) return null; // too little overlap for a meaningful estimate
+
+  const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const meanNav = mean(navReturns);
+  const meanBench = mean(benchReturns);
+  let cov = 0;
+  let varBench = 0;
+  for (let i = 0; i < navReturns.length; i++) {
+    cov += (navReturns[i] - meanNav) * (benchReturns[i] - meanBench);
+    varBench += (benchReturns[i] - meanBench) ** 2;
+  }
+  return varBench ? cov / varBench : null;
 }
 
 /** [{as_of, <valueKey>}] -> [{as_of, y}] of % change from the first point. */
@@ -414,7 +593,7 @@ function renderHoldings(d) {
     return;
   }
 
-  barsH(showChartView("#holdings-chart"), {
+  barsV(showChartView("#holdings-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: "Holdings by market value",
@@ -423,9 +602,7 @@ function renderHoldings(d) {
 }
 
 function renderPnl(d) {
-  const rows = d.positions
-    .slice()
-    .sort((a, b) => b.unrealized_pnl - a.unrealized_pnl);
+  const rows = sortByPositionSort(d.positions);
 
   const gains = rows.filter((r) => r.unrealized_pnl >= 0).length;
   $("#pnl-sub").textContent = `${gains} in profit · ${rows.length - gains} in loss`;
@@ -441,7 +618,7 @@ function renderPnl(d) {
     return;
   }
 
-  divergingBars(showChartView("#pnl-chart"), { rows, currency: state.currency });
+  divergingBarsV(showChartView("#pnl-chart"), { rows, currency: state.currency });
 }
 
 /** Part-to-whole: every open position's share of the book. Every holding
@@ -547,19 +724,48 @@ function closeGroupDrilldown() {
   $("#drilldown-overlay").hidden = true;
 }
 
+/** Same overlay as openGroupDrilldown, for a tile whose "group" is an
+ * arbitrary filter over the whole book (e.g. above/below average position
+ * size) rather than one allocation dimension's value -- so there's no single
+ * shared "group total" for a percent-of-group column, only each position's
+ * own share of NLV. */
+function openPositionListDrilldown(title, subtitle, rows) {
+  const overlay = $("#drilldown-overlay");
+  $("#drilldown-title").textContent = title;
+  $("#drilldown-sub").textContent = subtitle;
+
+  if (!rows.length) {
+    $("#drilldown-table").innerHTML = `<p class="empty">No positions to show.</p>`;
+    overlay.hidden = false;
+    return;
+  }
+
+  $("#drilldown-table").innerHTML = `<table>
+    <thead><tr><th>Symbol</th><th>Name</th><th>Market value</th><th>Share of NLV</th></tr></thead>
+    <tbody>${rows
+      .map(
+        (p) => `<tr>
+          <td class="sym">${escapeHtml(p.symbol)}</td>
+          <td class="desc" title="${escapeHtml(p.description)}">${escapeHtml(p.description)}</td>
+          <td>${fmt.currency(p.market_value, state.currency)}</td>
+          <td>${fmt.pct(p.pct_of_nlv, 2)}</td>
+        </tr>`,
+      )
+      .join("")}</tbody>
+  </table>`;
+  overlay.hidden = false;
+}
+
 /** Two magnitudes per holding, side by side rather than netted -- what was
  * paid next to what it is worth now. The diverging P&L chart already shows
  * the *difference*; this shows the two numbers that difference comes from. */
 function renderCostBasisVsValue(d) {
-  const rows = d.positions
-    .slice()
-    .sort((a, b) => b.market_value - a.market_value)
-    .map((p) => ({
-      label: p.symbol,
-      description: p.description,
-      cost_basis: p.cost_basis,
-      market_value: p.market_value,
-    }));
+  const rows = sortByPositionSort(d.positions).map((p) => ({
+    label: p.symbol,
+    description: p.description,
+    cost_basis: p.cost_basis,
+    market_value: p.market_value,
+  }));
 
   $("#costval-sub").textContent = `All ${rows.length} positions`;
 
@@ -574,7 +780,7 @@ function renderCostBasisVsValue(d) {
     return;
   }
 
-  groupedBarsH(showChartView("#costval-chart"), {
+  groupedBarsV(showChartView("#costval-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: "Cost basis compared with market value",
@@ -630,14 +836,22 @@ const POSITION_COLUMNS = [
   { key: "unrealized_pnl_pct", label: "Return", type: "pct", signed: true },
 ];
 
-function renderPositionsTable(d) {
+/** Sorts positions by whatever column the Open positions table is currently
+ * sorted on -- shared with the Cost basis chart so the two stay in lockstep
+ * instead of the chart quietly keeping its own, different order. */
+function sortByPositionSort(positions) {
   const { key, dir } = state.positionSort;
-  const rows = d.positions.slice().sort((a, b) => {
+  return positions.slice().sort((a, b) => {
     const av = a[key];
     const bv = b[key];
     const cmp = typeof av === "string" ? av.localeCompare(bv) : (av ?? 0) - (bv ?? 0);
     return dir === "asc" ? cmp : -cmp;
   });
+}
+
+function renderPositionsTable(d) {
+  const { key, dir } = state.positionSort;
+  const rows = sortByPositionSort(d.positions);
 
   $("#positions-sub").textContent =
     `${rows.length} open positions · click a column to sort`;
@@ -664,6 +878,8 @@ function renderPositionsTable(d) {
           ? { key: nextKey, dir: state.positionSort.dir === "asc" ? "desc" : "asc" }
           : { key: nextKey, dir: "desc" };
       renderPositionsTable(state.data);
+      renderCostBasisVsValue(state.data);
+      renderPnl(state.data);
     });
   });
 }
@@ -787,6 +1003,7 @@ function initControls() {
         b.setAttribute("aria-pressed", String(b === btn)),
       );
       renderNav(state.data);
+      renderHero(state.data); // Max/Min NLV tiles track the same range
     });
   });
 
