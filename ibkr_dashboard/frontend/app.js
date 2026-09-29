@@ -126,6 +126,12 @@ function render() {
   renderCashTable(d);
   renderTradesTable(d);
   renderFooter(d);
+
+  // The Beta tile needs SPY history that the "Compare" toggle otherwise
+  // only fetches on demand; kick it off here so the tile fills in shortly
+  // after load without the user having to click anything. Cached after the
+  // first call, so this is a no-op on every render after the first.
+  ensureBenchmarksLoaded().then(() => renderHero(state.data));
 }
 
 function renderHeader(d) {
@@ -199,6 +205,36 @@ function renderHero(d) {
   const totalCostBasis = d.positions.reduce((sum, p) => sum + (p.cost_basis || 0), 0);
   const costBasisGainPct = totalCostBasis ? (s.unrealized_pnl / totalCostBasis) * 100 : 0;
 
+  const winners = d.positions.filter((p) => p.unrealized_pnl > 0).length;
+  const winRatePct = d.positions.length ? (winners / d.positions.length) * 100 : 0;
+
+  // Same range as the Max/Min NLV tiles above -- start and end of whatever
+  // window the NAV chart is currently showing, not the full history.
+  const periodStartNav = rangePoints.length ? rangePoints[0].nav : null;
+  const periodEndNav = rangePoints.length ? rangePoints[rangePoints.length - 1].nav : null;
+  const periodChange = periodStartNav && periodEndNav ? periodEndNav - periodStartNav : null;
+  const periodChangePct = periodStartNav ? ((periodEndNav / periodStartNav) - 1) * 100 : null;
+
+  // US estate-tax situs: IBKR's own issuerCountryCode already tells us the
+  // issuer's country of incorporation (not the listing exchange or trading
+  // currency), which is exactly the test IRC 2104/2105 uses -- stock of a
+  // US-incorporated company or a US-domiciled fund is US-situs; a foreign
+  // company's stock or ADR, and an Irish/Luxembourg UCITS ETF, is not, no
+  // matter where or in what currency it trades. This is a best-effort read
+  // of that one field, not tax advice -- a redomiciled issuer or a data gap
+  // could still throw it off, so treat it as a tracking aid, not a verdict.
+  const usSitusValue = d.positions
+    .filter((p) => (p.country || "").toUpperCase() === "US")
+    .reduce((sum, p) => sum + p.market_value, 0);
+  const usSitusExemption = 60000;
+
+  const beta = computePortfolioBeta(d);
+  const betaNote = beta !== null
+    ? "Empirical, from daily NAV vs. SPY"
+    : state.benchmarks
+      ? "Benchmark data unavailable right now"
+      : "Loading benchmark history...";
+
   const tiles = [
     { label: "Securities", value: fmt.currency(s.securities_gross_value, c),
       note: `${d.concentration.position_count} positions` },
@@ -211,6 +247,8 @@ function renderHero(d) {
     { label: "Total losses", value: fmt.currency(totalLosses, c),
       note: `${losingPositions.length} ${losingPositions.length === 1 ? "position" : "positions"} in the red`,
       cls: "down" },
+    { label: "Win rate", value: fmt.pct(winRatePct, 1),
+      note: `${winners} of ${d.positions.length} positions profitable` },
     { label: "Top 5 weight", value: fmt.pct(d.concentration.top5_pct, 1),
       note: `Behaves like ${fmt.number(d.concentration.effective_holdings, 1)} equal positions` },
     { label: "Max drawdown", value: fmt.pct(d.nav.max_drawdown_pct, 1),
@@ -220,10 +258,18 @@ function renderHero(d) {
       note: maxNavPoint ? `${state.navRange} range · ${fmt.date(maxNavPoint.as_of)}` : "No data for this range" },
     { label: "Min NLV", value: fmt.currency(minNavPoint ? minNavPoint.nav : null, c),
       note: minNavPoint ? `${state.navRange} range · ${fmt.date(minNavPoint.as_of)}` : "No data for this range" },
+    { label: "Period return", value: periodChange === null ? "--" : fmt.currency(periodChange, c),
+      note: periodChangePct === null ? `${state.navRange} range` : `${fmt.signedPct(periodChangePct)} · ${state.navRange} range`,
+      cls: periodChange === null ? "" : periodChange >= 0 ? "up" : "down" },
     { label: "Avg. position size", value: fmt.pct(avgPositionPct, 2),
       note: `${positionCount} holdings · share of NLV` },
     { label: "Total cost basis", value: fmt.currency(totalCostBasis, c),
       note: `${fmt.signedPct(costBasisGainPct)} vs. cost basis`, cls: costBasisGainPct >= 0 ? "up" : "down" },
+    { label: "US-situs value", value: fmt.currency(usSitusValue, c),
+      note: `${fmt.pct((usSitusValue / usSitusExemption) * 100, 0)} of $60,000 estate-tax exemption`,
+      cls: usSitusValue >= usSitusExemption ? "down" : "" },
+    { label: "Beta (vs S&P 500)", value: beta === null ? "--" : fmt.number(beta, 2),
+      note: betaNote },
   ];
 
   $("#tiles").innerHTML = tiles
@@ -276,6 +322,49 @@ async function ensureBenchmarksLoaded() {
     state.benchmarks = { series: {}, warnings: [`Could not reach the dashboard server: ${err.message}`] };
   }
   return state.benchmarks;
+}
+
+/**
+ * Empirical beta against SPY: the slope of the portfolio's own daily NAV
+ * moves against the S&P 500's, over whatever history the two series share.
+ * This is a statistical read of how the book has actually behaved, not a
+ * lookup of published per-stock betas -- and like every metric built on the
+ * NAV series (see nav_metrics' own caveat), it is money-weighted, so a
+ * large deposit or withdrawal day would show up as a return and skew it.
+ * Returns null until benchmark history has loaded, or if the two series
+ * don't share enough overlapping days for the estimate to mean anything.
+ */
+function computePortfolioBeta(d) {
+  const benchPoints = state.benchmarks?.series?.SPY;
+  if (!benchPoints || !benchPoints.length) return null;
+
+  const benchByDate = new Map(benchPoints.map((p) => [p.as_of, p.close]));
+  const aligned = (d.nav.points || [])
+    .filter((p) => p.nav && benchByDate.has(p.as_of))
+    .map((p) => ({ nav: p.nav, bench: benchByDate.get(p.as_of) }));
+
+  const navReturns = [];
+  const benchReturns = [];
+  for (let i = 1; i < aligned.length; i++) {
+    const prevNav = aligned[i - 1].nav;
+    const prevBench = aligned[i - 1].bench;
+    if (prevNav && prevBench) {
+      navReturns.push(aligned[i].nav / prevNav - 1);
+      benchReturns.push(aligned[i].bench / prevBench - 1);
+    }
+  }
+  if (navReturns.length < 10) return null; // too little overlap for a meaningful estimate
+
+  const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const meanNav = mean(navReturns);
+  const meanBench = mean(benchReturns);
+  let cov = 0;
+  let varBench = 0;
+  for (let i = 0; i < navReturns.length; i++) {
+    cov += (navReturns[i] - meanNav) * (benchReturns[i] - meanBench);
+    varBench += (benchReturns[i] - meanBench) ** 2;
+  }
+  return varBench ? cov / varBench : null;
 }
 
 /** [{as_of, <valueKey>}] -> [{as_of, y}] of % change from the first point. */
