@@ -289,6 +289,8 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
+.tile.clickable { cursor: pointer; }
+.tile.clickable:hover, .tile.clickable:focus-visible { background: var(--surface-sunken); }
 .tile .label { font-size: 12px; color: var(--text-muted); }
 .tile .value {
   font-size: 21px;

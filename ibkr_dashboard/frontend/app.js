@@ -198,9 +198,23 @@ function renderHero(d) {
     : null;
 
   const positionCount = d.concentration.position_count;
-  const avgPositionPct = positionCount && s.net_liquidation
-    ? (s.securities_gross_value / s.net_liquidation / positionCount) * 100
+
+  // Each position's own share of NLV, plus the mean of those exact numbers
+  // -- so "average position size" and the above/below split below can never
+  // quietly disagree with each other over rounding or which total they used.
+  const positionsWithNlvShare = d.positions.map((p) => ({
+    ...p,
+    pct_of_nlv: s.net_liquidation ? (Math.abs(p.market_value) / s.net_liquidation) * 100 : 0,
+  }));
+  const avgPositionPct = positionsWithNlvShare.length
+    ? positionsWithNlvShare.reduce((sum, p) => sum + p.pct_of_nlv, 0) / positionsWithNlvShare.length
     : 0;
+  const abovePositions = positionsWithNlvShare
+    .filter((p) => p.pct_of_nlv > avgPositionPct)
+    .sort((a, b) => b.pct_of_nlv - a.pct_of_nlv);
+  const belowPositions = positionsWithNlvShare
+    .filter((p) => p.pct_of_nlv <= avgPositionPct)
+    .sort((a, b) => b.pct_of_nlv - a.pct_of_nlv);
 
   const totalCostBasis = d.positions.reduce((sum, p) => sum + (p.cost_basis || 0), 0);
   const costBasisGainPct = totalCostBasis ? (s.unrealized_pnl / totalCostBasis) * 100 : 0;
@@ -243,10 +257,30 @@ function renderHero(d) {
       : "Loading benchmark history...";
 
   const tiles = [
+    // --- Size & composition ---
     { label: "Securities", value: fmt.currency(s.securities_gross_value, c),
       note: `${d.concentration.position_count} positions` },
     { label: "Cash", value: fmt.currency(s.total_cash, c),
       note: `${d.cash.length} ${d.cash.length === 1 ? "currency" : "currencies"}` },
+    { label: "Top 5 weight", value: fmt.pct(d.concentration.top5_pct, 1),
+      note: `Behaves like ${fmt.number(d.concentration.effective_holdings, 1)} equal positions` },
+    { label: "Avg. position size", value: fmt.pct(avgPositionPct, 2),
+      note: `${positionCount} holdings · share of NLV` },
+    { label: "Above avg. position", value: `${abovePositions.length}`,
+      note: `of ${positionCount} · click to see which`,
+      onClick: () => openPositionListDrilldown(
+        "Above-average position size",
+        `${abovePositions.length} of ${positionCount} positions, each over ${fmt.pct(avgPositionPct, 2)} of NLV`,
+        abovePositions,
+      ) },
+    { label: "Below avg. position", value: `${belowPositions.length}`,
+      note: `of ${positionCount} · click to see which`,
+      onClick: () => openPositionListDrilldown(
+        "Below-average position size",
+        `${belowPositions.length} of ${positionCount} positions, each at or under ${fmt.pct(avgPositionPct, 2)} of NLV`,
+        belowPositions,
+      ) },
+    // --- Performance ---
     { label: "Unrealized P&L", value: fmt.currency(s.unrealized_pnl, c),
       note: `${pnlUp ? "Gain" : "Loss"} on open positions`, cls: pnlUp ? "up" : "down" },
     { label: "Realized P&L", value: fmt.currency(s.realized_pnl, c),
@@ -256,20 +290,6 @@ function renderHero(d) {
       cls: "down" },
     { label: "Win rate", value: fmt.pct(winRatePct, 1),
       note: `${winners} of ${d.positions.length} positions profitable` },
-    { label: "Top 5 weight", value: fmt.pct(d.concentration.top5_pct, 1),
-      note: `Behaves like ${fmt.number(d.concentration.effective_holdings, 1)} equal positions` },
-    { label: "Max drawdown", value: fmt.pct(d.nav.max_drawdown_pct, 1),
-      note: d.nav.max_drawdown_date ? `Trough ${fmt.date(d.nav.max_drawdown_date)}` : "",
-      cls: "down" },
-    { label: "Max NLV", value: fmt.currency(maxNavPoint ? maxNavPoint.nav : null, c),
-      note: maxNavPoint ? `${state.navRange} range · ${fmt.date(maxNavPoint.as_of)}` : "No data for this range" },
-    { label: "Min NLV", value: fmt.currency(minNavPoint ? minNavPoint.nav : null, c),
-      note: minNavPoint ? `${state.navRange} range · ${fmt.date(minNavPoint.as_of)}` : "No data for this range" },
-    { label: "Period return", value: periodChange === null ? "--" : fmt.currency(periodChange, c),
-      note: periodChangePct === null ? `${state.navRange} range` : `${fmt.signedPct(periodChangePct)} · ${state.navRange} range`,
-      cls: periodChange === null ? "" : periodChange >= 0 ? "up" : "down" },
-    { label: "Avg. position size", value: fmt.pct(avgPositionPct, 2),
-      note: `${positionCount} holdings · share of NLV` },
     { label: "Total cost basis", value: fmt.currency(totalCostBasis, c),
       note: `${fmt.signedPct(costBasisGainPct)} vs. cost basis`, cls: costBasisGainPct >= 0 ? "up" : "down" },
     { label: "Return on deposits", value: depositReturnPct === null ? "--" : fmt.signedPct(depositReturnPct, 1),
@@ -277,22 +297,45 @@ function renderHero(d) {
         ? `vs. ${fmt.currency(totalDeposited, c)} deposited`
         : "Set IBKR_TOTAL_DEPOSITED in .env",
       cls: depositReturnPct === null ? "" : depositReturnPct >= 0 ? "up" : "down" },
+    // --- Over time ---
+    { label: "Max NLV", value: fmt.currency(maxNavPoint ? maxNavPoint.nav : null, c),
+      note: maxNavPoint ? `${state.navRange} range · ${fmt.date(maxNavPoint.as_of)}` : "No data for this range" },
+    { label: "Min NLV", value: fmt.currency(minNavPoint ? minNavPoint.nav : null, c),
+      note: minNavPoint ? `${state.navRange} range · ${fmt.date(minNavPoint.as_of)}` : "No data for this range" },
+    { label: "Period return", value: periodChange === null ? "--" : fmt.currency(periodChange, c),
+      note: periodChangePct === null ? `${state.navRange} range` : `${fmt.signedPct(periodChangePct)} · ${state.navRange} range`,
+      cls: periodChange === null ? "" : periodChange >= 0 ? "up" : "down" },
+    { label: "Max drawdown", value: fmt.pct(d.nav.max_drawdown_pct, 1),
+      note: d.nav.max_drawdown_date ? `Trough ${fmt.date(d.nav.max_drawdown_date)}` : "",
+      cls: "down" },
+    // --- Risk & tax ---
+    { label: "Beta (vs S&P 500)", value: beta === null ? "--" : fmt.number(beta, 2),
+      note: betaNote },
     { label: "US-situs value", value: fmt.currency(usSitusValue, c),
       note: `${fmt.pct((usSitusValue / usSitusExemption) * 100, 0)} of $60,000 estate-tax exemption`,
       cls: usSitusValue >= usSitusExemption ? "down" : "" },
-    { label: "Beta (vs S&P 500)", value: beta === null ? "--" : fmt.number(beta, 2),
-      note: betaNote },
   ];
 
   $("#tiles").innerHTML = tiles
     .map(
-      (t) => `<div class="tile">
+      (t, i) => `<div class="tile${t.onClick ? " clickable" : ""}"${t.onClick ? ` data-tile-index="${i}" role="button" tabindex="0"` : ""}>
         <div class="label">${t.label}</div>
         <div class="value ${t.cls || ""}">${t.value}</div>
         <div class="delta">${t.note || ""}</div>
       </div>`,
     )
     .join("");
+
+  $$("#tiles .tile.clickable").forEach((el) => {
+    const t = tiles[Number(el.dataset.tileIndex)];
+    el.addEventListener("click", t.onClick);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        t.onClick();
+      }
+    });
+  });
 }
 
 /* -------------------------------------------------------------- NAV chart */
@@ -679,6 +722,38 @@ function openGroupDrilldown(dim, row) {
 
 function closeGroupDrilldown() {
   $("#drilldown-overlay").hidden = true;
+}
+
+/** Same overlay as openGroupDrilldown, for a tile whose "group" is an
+ * arbitrary filter over the whole book (e.g. above/below average position
+ * size) rather than one allocation dimension's value -- so there's no single
+ * shared "group total" for a percent-of-group column, only each position's
+ * own share of NLV. */
+function openPositionListDrilldown(title, subtitle, rows) {
+  const overlay = $("#drilldown-overlay");
+  $("#drilldown-title").textContent = title;
+  $("#drilldown-sub").textContent = subtitle;
+
+  if (!rows.length) {
+    $("#drilldown-table").innerHTML = `<p class="empty">No positions to show.</p>`;
+    overlay.hidden = false;
+    return;
+  }
+
+  $("#drilldown-table").innerHTML = `<table>
+    <thead><tr><th>Symbol</th><th>Name</th><th>Market value</th><th>Share of NLV</th></tr></thead>
+    <tbody>${rows
+      .map(
+        (p) => `<tr>
+          <td class="sym">${escapeHtml(p.symbol)}</td>
+          <td class="desc" title="${escapeHtml(p.description)}">${escapeHtml(p.description)}</td>
+          <td>${fmt.currency(p.market_value, state.currency)}</td>
+          <td>${fmt.pct(p.pct_of_nlv, 2)}</td>
+        </tr>`,
+      )
+      .join("")}</tbody>
+  </table>`;
+  overlay.hidden = false;
 }
 
 /** Two magnitudes per holding, side by side rather than netted -- what was
