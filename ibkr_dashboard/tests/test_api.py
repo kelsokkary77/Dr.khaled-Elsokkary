@@ -50,7 +50,27 @@ def test_dashboard_payload_has_every_section(client):
     assert {
         "summary", "positions", "cash", "trades", "allocation", "concentration",
         "movers", "nav", "activity", "warnings", "base_currency", "storage",
+        "total_deposited",
     } <= set(body)
+
+
+def test_dashboard_reports_total_deposited_from_settings(tmp_path, monkeypatch):
+    from backend import main
+
+    settings = Settings(
+        provider="demo", db_path=tmp_path / "deposits.sqlite3", total_deposited=250_000.0
+    )
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(
+        main, "service", DashboardService(settings, SnapshotStore(settings.db_path))
+    )
+    body = TestClient(main.app).get("/api/dashboard").json()
+    assert body["total_deposited"] == 250_000.0
+
+
+def test_dashboard_defaults_total_deposited_to_zero(client):
+    body = client.get("/api/dashboard").json()
+    assert body["total_deposited"] == 0.0
 
 
 def test_position_weights_sum_to_one_hundred(client):

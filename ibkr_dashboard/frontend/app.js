@@ -229,6 +229,13 @@ function renderHero(d) {
   const usSitusExemption = 60000;
 
   const beta = computePortfolioBeta(d);
+
+  // Entered by hand in .env (IBKR_TOTAL_DEPOSITED), never in source code --
+  // see config.py for why this can't be fetched reliably from IBKR itself.
+  const totalDeposited = d.total_deposited || 0;
+  const depositReturnPct = totalDeposited
+    ? ((s.net_liquidation - totalDeposited) / totalDeposited) * 100
+    : null;
   const betaNote = beta !== null
     ? "Empirical, from daily NAV vs. SPY"
     : state.benchmarks
@@ -265,6 +272,11 @@ function renderHero(d) {
       note: `${positionCount} holdings · share of NLV` },
     { label: "Total cost basis", value: fmt.currency(totalCostBasis, c),
       note: `${fmt.signedPct(costBasisGainPct)} vs. cost basis`, cls: costBasisGainPct >= 0 ? "up" : "down" },
+    { label: "Return on deposits", value: depositReturnPct === null ? "--" : fmt.signedPct(depositReturnPct, 1),
+      note: totalDeposited
+        ? `vs. ${fmt.currency(totalDeposited, c)} deposited`
+        : "Set IBKR_TOTAL_DEPOSITED in .env",
+      cls: depositReturnPct === null ? "" : depositReturnPct >= 0 ? "up" : "down" },
     { label: "US-situs value", value: fmt.currency(usSitusValue, c),
       note: `${fmt.pct((usSitusValue / usSitusExemption) * 100, 0)} of $60,000 estate-tax exemption`,
       cls: usSitusValue >= usSitusExemption ? "down" : "" },

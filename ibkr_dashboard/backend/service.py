@@ -80,6 +80,7 @@ class DashboardService:
         payload["base_currency"] = (
             snapshot.summary.base_currency or self.settings.base_currency
         )
+        payload["total_deposited"] = self.settings.total_deposited
         payload["last_sync"] = self.store.last_sync()
         payload["storage"] = self.store.counts()
         return payload
