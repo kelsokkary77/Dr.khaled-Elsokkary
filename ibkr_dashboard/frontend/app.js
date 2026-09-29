@@ -423,9 +423,7 @@ function renderHoldings(d) {
 }
 
 function renderPnl(d) {
-  const rows = d.positions
-    .slice()
-    .sort((a, b) => b.unrealized_pnl - a.unrealized_pnl);
+  const rows = sortByPositionSort(d.positions);
 
   const gains = rows.filter((r) => r.unrealized_pnl >= 0).length;
   $("#pnl-sub").textContent = `${gains} in profit · ${rows.length - gains} in loss`;
@@ -670,6 +668,7 @@ function renderPositionsTable(d) {
           : { key: nextKey, dir: "desc" };
       renderPositionsTable(state.data);
       renderCostBasisVsValue(state.data);
+      renderPnl(state.data);
     });
   });
 }
