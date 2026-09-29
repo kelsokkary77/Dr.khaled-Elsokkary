@@ -1,4 +1,4 @@
-import { fmt, lineChart, multiLineChart, barsH, divergingBars, donutChart, groupedBarsH, teardown } from "./charts.js";
+import { fmt, lineChart, multiLineChart, barsH, barsV, divergingBarsV, donutChart, groupedBarsV, teardown } from "./charts.js";
 
 const state = {
   data: null,
@@ -414,7 +414,7 @@ function renderHoldings(d) {
     return;
   }
 
-  barsH(showChartView("#holdings-chart"), {
+  barsV(showChartView("#holdings-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: "Holdings by market value",
@@ -441,7 +441,7 @@ function renderPnl(d) {
     return;
   }
 
-  divergingBars(showChartView("#pnl-chart"), { rows, currency: state.currency });
+  divergingBarsV(showChartView("#pnl-chart"), { rows, currency: state.currency });
 }
 
 /** Part-to-whole: every open position's share of the book. Every holding
@@ -574,7 +574,7 @@ function renderCostBasisVsValue(d) {
     return;
   }
 
-  groupedBarsH(showChartView("#costval-chart"), {
+  groupedBarsV(showChartView("#costval-chart"), {
     rows,
     currency: state.currency,
     ariaLabel: "Cost basis compared with market value",

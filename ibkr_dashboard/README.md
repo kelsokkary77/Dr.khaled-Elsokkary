@@ -17,11 +17,11 @@ and never places orders — every IBKR call it makes is read-only.
 | **Hero + tiles** | Net liquidation value, day change, cash, securities, unrealized and realized P&L, top-5 weight, max drawdown |
 | **NAV chart** | Net liquidation over time, with crosshair, tooltip, 1W/1M/3M/6M/YTD/1Y/2Y/All ranges, and an optional overlay comparing your % return against the S&P 500 (SPY) and Nasdaq-100 (QQQ) over the same range |
 | **Allocation** | Market value by asset class, sector, security type, currency or country — click a bar to see the holdings behind it |
-| **Holdings by market value** | Every open position, largest first |
+| **Holdings by market value** | Every open position as a column, largest first — scrolls sideways rather than shrinking bars once there are too many to stay legible |
 | **Position weight** | Donut of every holding's share of the book — no top-N, no "Other" bucket |
 | **Sector allocation** | Donut of market value by real sector (Technology, Healthcare, ...), covering every position — click a slice or legend entry to see the holdings in it |
-| **P&L by position** | Diverging bars — gains right, losses left, on one shared scale — every position |
-| **Cost basis vs. market value** | Two bars per holding — what was paid next to what it's worth now — every position |
+| **P&L by position** | Diverging columns — gains up, losses down, on one shared scale — every position |
+| **Cost basis vs. market value** | Two columns per holding — what was paid next to what it's worth now — every position |
 | **Open positions** | Sortable table: quantity, mark, average cost, market value, weight, P&L, return |
 | **Cash balances** | Per-currency balance, base-currency equivalent, share of cash |
 | **Recent trades** | Date, side, quantity, price, proceeds, commission, realized P&L |
@@ -396,9 +396,9 @@ Providers all return the same `PortfolioSnapshot`, so analytics and the UI never
 know which source they are looking at. Adding a source means writing one class.
 
 The frontend has **no dependencies and loads nothing from a CDN** — the charts
-are hand-built SVG (line, horizontal bar, diverging bar, grouped bar, donut). A
-dashboard that reads a brokerage account should not ship third-party
-JavaScript, and it works with the network off.
+are hand-built SVG (line, horizontal bar, vertical bar, diverging bar,
+grouped bar, donut). A dashboard that reads a brokerage account should not
+ship third-party JavaScript, and it works with the network off.
 
 Every position-level chart and table shows **every open position** — nothing
 is capped at a "top 10" or a "top 5." Labels are free text from the broker

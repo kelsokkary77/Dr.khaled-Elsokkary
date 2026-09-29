@@ -329,6 +329,12 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(
 .chart { position: relative; width: 100%; }
 .chart svg { display: block; width: 100%; overflow: visible; }
 
+/* A vertical bar chart with too many columns to stay legible at the card's
+   width grows past it instead of squeezing bars thinner -- this lets that
+   extra width scroll instead of overflowing the page. */
+.chart.h-scroll { overflow-x: auto; overflow-y: hidden; }
+.chart.h-scroll svg { width: auto; max-width: none; }
+
 .tick { font-size: 11px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
 .mark-label { font-size: 11px; fill: var(--text-secondary); }
 .mark-label.strong { fill: var(--text-primary); font-weight: 600; }
