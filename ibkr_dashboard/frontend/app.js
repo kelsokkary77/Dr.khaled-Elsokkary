@@ -551,15 +551,12 @@ function closeGroupDrilldown() {
  * paid next to what it is worth now. The diverging P&L chart already shows
  * the *difference*; this shows the two numbers that difference comes from. */
 function renderCostBasisVsValue(d) {
-  const rows = d.positions
-    .slice()
-    .sort((a, b) => b.market_value - a.market_value)
-    .map((p) => ({
-      label: p.symbol,
-      description: p.description,
-      cost_basis: p.cost_basis,
-      market_value: p.market_value,
-    }));
+  const rows = sortByPositionSort(d.positions).map((p) => ({
+    label: p.symbol,
+    description: p.description,
+    cost_basis: p.cost_basis,
+    market_value: p.market_value,
+  }));
 
   $("#costval-sub").textContent = `All ${rows.length} positions`;
 
@@ -630,14 +627,22 @@ const POSITION_COLUMNS = [
   { key: "unrealized_pnl_pct", label: "Return", type: "pct", signed: true },
 ];
 
-function renderPositionsTable(d) {
+/** Sorts positions by whatever column the Open positions table is currently
+ * sorted on -- shared with the Cost basis chart so the two stay in lockstep
+ * instead of the chart quietly keeping its own, different order. */
+function sortByPositionSort(positions) {
   const { key, dir } = state.positionSort;
-  const rows = d.positions.slice().sort((a, b) => {
+  return positions.slice().sort((a, b) => {
     const av = a[key];
     const bv = b[key];
     const cmp = typeof av === "string" ? av.localeCompare(bv) : (av ?? 0) - (bv ?? 0);
     return dir === "asc" ? cmp : -cmp;
   });
+}
+
+function renderPositionsTable(d) {
+  const { key, dir } = state.positionSort;
+  const rows = sortByPositionSort(d.positions);
 
   $("#positions-sub").textContent =
     `${rows.length} open positions · click a column to sort`;
@@ -664,6 +669,7 @@ function renderPositionsTable(d) {
           ? { key: nextKey, dir: state.positionSort.dir === "asc" ? "desc" : "asc" }
           : { key: nextKey, dir: "desc" };
       renderPositionsTable(state.data);
+      renderCostBasisVsValue(state.data);
     });
   });
 }
