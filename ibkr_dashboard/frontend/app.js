@@ -175,6 +175,30 @@ function renderHero(d) {
     : "";
 
   const pnlUp = s.unrealized_pnl >= 0;
+
+  const losingPositions = d.positions.filter((p) => p.unrealized_pnl < 0);
+  const totalLosses = losingPositions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+
+  // Max/min over whatever window the NAV chart's own range buttons currently
+  // show -- not the full history -- so this tile always answers "for the
+  // period I'm looking at", same as the chart above it.
+  const rangePoints = navPointsForRange(d);
+  const navValues = rangePoints.map((p) => p.nav).filter((v) => v !== null && v !== undefined);
+  const maxNavPoint = navValues.length
+    ? rangePoints.find((p) => p.nav === Math.max(...navValues))
+    : null;
+  const minNavPoint = navValues.length
+    ? rangePoints.find((p) => p.nav === Math.min(...navValues))
+    : null;
+
+  const positionCount = d.concentration.position_count;
+  const avgPositionPct = positionCount && s.net_liquidation
+    ? (s.securities_gross_value / s.net_liquidation / positionCount) * 100
+    : 0;
+
+  const totalCostBasis = d.positions.reduce((sum, p) => sum + (p.cost_basis || 0), 0);
+  const costBasisGainPct = totalCostBasis ? (s.unrealized_pnl / totalCostBasis) * 100 : 0;
+
   const tiles = [
     { label: "Securities", value: fmt.currency(s.securities_gross_value, c),
       note: `${d.concentration.position_count} positions` },
@@ -184,11 +208,22 @@ function renderHero(d) {
       note: `${pnlUp ? "Gain" : "Loss"} on open positions`, cls: pnlUp ? "up" : "down" },
     { label: "Realized P&L", value: fmt.currency(s.realized_pnl, c),
       note: "From closed trades", cls: s.realized_pnl >= 0 ? "up" : "down" },
+    { label: "Total losses", value: fmt.currency(totalLosses, c),
+      note: `${losingPositions.length} ${losingPositions.length === 1 ? "position" : "positions"} in the red`,
+      cls: "down" },
     { label: "Top 5 weight", value: fmt.pct(d.concentration.top5_pct, 1),
       note: `Behaves like ${fmt.number(d.concentration.effective_holdings, 1)} equal positions` },
     { label: "Max drawdown", value: fmt.pct(d.nav.max_drawdown_pct, 1),
       note: d.nav.max_drawdown_date ? `Trough ${fmt.date(d.nav.max_drawdown_date)}` : "",
       cls: "down" },
+    { label: "Max NLV", value: fmt.currency(maxNavPoint ? maxNavPoint.nav : null, c),
+      note: maxNavPoint ? `${state.navRange} range · ${fmt.date(maxNavPoint.as_of)}` : "No data for this range" },
+    { label: "Min NLV", value: fmt.currency(minNavPoint ? minNavPoint.nav : null, c),
+      note: minNavPoint ? `${state.navRange} range · ${fmt.date(minNavPoint.as_of)}` : "No data for this range" },
+    { label: "Avg. position size", value: fmt.pct(avgPositionPct, 2),
+      note: `${positionCount} holdings · share of NLV` },
+    { label: "Total cost basis", value: fmt.currency(totalCostBasis, c),
+      note: `${fmt.signedPct(costBasisGainPct)} vs. cost basis`, cls: costBasisGainPct >= 0 ? "up" : "down" },
   ];
 
   $("#tiles").innerHTML = tiles
@@ -792,6 +827,7 @@ function initControls() {
         b.setAttribute("aria-pressed", String(b === btn)),
       );
       renderNav(state.data);
+      renderHero(state.data); // Max/Min NLV tiles track the same range
     });
   });
 
