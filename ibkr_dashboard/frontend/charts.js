@@ -972,7 +972,12 @@ export function divergingBarsV(container, options) {
   responsive(container, (containerWidth) => {
     const pos = token("--pos");
     const neg = token("--neg");
-    const pad = { top: 14, right: 14, bottom: 34, left: 62 };
+    // Extra top and bottom padding over the usual 14px/34px -- the
+    // return-percent label sitting past each bar's tip needs its own
+    // headroom (above for a gain, below for a loss), or the tallest bar's
+    // label would clip against the card edge or collide with the symbol
+    // label underneath.
+    const pad = { top: 26, right: 14, bottom: 46, left: 62 };
 
     const natural = rows.length * minSlot + pad.left + pad.right;
     const scrolls = natural > containerWidth;
@@ -1018,9 +1023,20 @@ export function divergingBarsV(container, options) {
       group.appendChild(
         el("path", { d: barPath(x, y, barW, h, gain ? "up" : "down"), fill: gain ? pos : neg }),
       );
+      // Return percent, the second channel beside color -- sits just past
+      // the bar's own tip, above for a gain, below for a loss. Capped for a
+      // loss so the largest bar (tip at the plot's bottom edge) never pushes
+      // its label down into the symbol row below.
       group.appendChild(
         el("text", {
-          x: colLeft + slot / 2, y: pad.top + plotH + 16,
+          x: colLeft + slot / 2,
+          y: gain ? y - 6 : Math.min(y + h + 13, pad.top + plotH + 13),
+          "text-anchor": "middle", class: "mark-label",
+        }, fmt.signedPct(row[pctKey] ?? 0, 1)),
+      );
+      group.appendChild(
+        el("text", {
+          x: colLeft + slot / 2, y: pad.top + plotH + 28,
           "text-anchor": "middle", class: "mark-label strong",
         }, row[labelKey]),
       );
