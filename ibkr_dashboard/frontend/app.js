@@ -323,8 +323,10 @@ function renderHero(d) {
       note: maxNavPoint ? `${state.navRange} range · ${fmt.date(maxNavPoint.as_of)}` : "No data for this range" },
     { label: "Min NLV", value: fmt.currency(minNavPoint ? minNavPoint.nav : null, c),
       note: minNavPoint ? `${state.navRange} range · ${fmt.date(minNavPoint.as_of)}` : "No data for this range" },
-    { label: "Period return", value: periodChange === null ? "--" : fmt.currency(periodChange, c),
-      note: periodChangePct === null ? `${state.navRange} range` : `${fmt.signedPct(periodChangePct)} · ${state.navRange} range`,
+    { label: "Period return", value: periodChangePct === null ? "--" : fmt.signedPct(periodChangePct, 1),
+      note: periodChange === null
+        ? `${state.navRange} range`
+        : `${periodChange >= 0 ? "+" : ""}${fmt.currency(periodChange, c)} · ${state.navRange} range`,
       cls: periodChange === null ? "" : periodChange >= 0 ? "up" : "down" },
     { label: "SPY period return", value: spyPeriodReturnPct === null ? "--" : fmt.signedPct(spyPeriodReturnPct, 1),
       note: spyPeriodReturnPct === null
