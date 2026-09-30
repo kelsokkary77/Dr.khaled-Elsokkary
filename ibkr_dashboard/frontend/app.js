@@ -173,6 +173,16 @@ function renderHero(d) {
   const c = state.currency;
   $("#hero-nav").textContent = fmt.currency(s.net_liquidation, c);
 
+  // Which trading day this number is actually from -- the IBKR app's own
+  // "current balance" view sits frozen at the last close until the next
+  // session opens, which reads as a mismatch if you don't know which day
+  // you're looking at. Falls back to the last point on hand if there's too
+  // little history yet for nav_metrics to have set end_date.
+  const asOfDate = d.nav.end_date || (d.nav.points && d.nav.points.length
+    ? d.nav.points[d.nav.points.length - 1].as_of
+    : null);
+  $("#hero-asof").textContent = asOfDate ? `as of ${fmt.date(asOfDate, { month: "short", day: "numeric", year: "numeric" })}` : "";
+
   const delta = $("#hero-delta");
   const up = s.day_change >= 0;
   delta.className = `delta ${up ? "up" : "down"}`;
@@ -364,7 +374,10 @@ function renderHero(d) {
 const RANGE_DAYS = { "1W": 7, "1M": 30, "3M": 91, "6M": 182, "1Y": 365, "2Y": 730, ALL: Infinity };
 
 function rangeCutoff(range) {
-  if (range === "YTD") return new Date(new Date().getFullYear(), 0, 1);
+  const now = new Date();
+  if (range === "YTD") return new Date(now.getFullYear(), 0, 1);
+  if (range === "MTD") return new Date(now.getFullYear(), now.getMonth(), 1);
+  if (range === "QTD") return new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
   const days = RANGE_DAYS[range] ?? Infinity;
   if (!Number.isFinite(days)) return null;
   const cutoff = new Date();

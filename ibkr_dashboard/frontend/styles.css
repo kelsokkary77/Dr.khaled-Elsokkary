@@ -270,6 +270,13 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(
   line-height: 1.05;
 }
 .hero .delta { font-size: 14px; font-weight: 500; padding-bottom: 8px; }
+.hero .asof {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: 10px;
+  vertical-align: middle;
+}
 
 .tiles {
   display: grid;
